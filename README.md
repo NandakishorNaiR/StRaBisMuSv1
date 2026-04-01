@@ -1,59 +1,60 @@
-# StRaBisMuSv1 App live link: https://octane12v1-strabismus.hf.space/?__theme=system&deep_link=qjYHTZBxsAc
-An ML opensource Project to check weather the human have Strabismus
 # 👁️ Strabismus Detection System
 
 ## 📌 Overview
 
-This project is an AI-based system that detects strabismus (eye misalignment) from facial images using deep learning.
+This project is an AI-powered system that detects **strabismus (eye misalignment)** from facial images using deep learning.
 
-It uses a Convolutional Neural Network (MobileNetV2) to analyze eye alignment and classify whether the eyes are normal or show signs of strabismus.
+The model analyzes eye alignment and classifies the image into:
+
+* Normal
+* Esotropia
+* Exotropia
+* Hypertropia
+* Hypotropia
+
+The system then determines whether the person has **normal vision or strabismus**.
 
 ---
 
 ## 🚀 Features
 
-* Detects **Normal vs Strabismus**
-* Classifies into:
-
-  * Esotropia
-  * Exotropia
-  * Hypertropia
-  * Hypotropia
-* Displays **confidence scores**
-* Interactive **Streamlit web app**
-* Real-time image upload and prediction
+* 🔍 Detects **Normal vs Strabismus**
+* 🧠 Multi-class classification of eye conditions
+* 📊 Displays **class probabilities**
+* 📈 Visualizes predictions with **probability graph**
+* 🌐 Deployed using Gradio (Hugging Face Spaces)
+* ⚡ Fast and interactive UI
 
 ---
 
-## 🧠 Tech Stack
+## 🧠 Model Details
 
-* Python
-* TensorFlow / Keras
-* Streamlit
-* NumPy
-* PIL
+* Model: MobileNetV2 (Transfer Learning)
+* Framework: TensorFlow / Keras
+* Input Size: 224 × 224
+* Output: 5 classes
 
 ---
 
 ## 📂 Project Structure
 
 ```
-strabismus_project/
+Strabismus/
 │
 ├── app.py
-├── eye.ipynb
+├── requirements.txt
 ├── models/
 │   ├── strabismus_model.keras
 │   └── class_indices.json
-├── requirements.txt
+├── eye.ipynb
 ├── README.md
 ```
 
 ---
 
-## ⚙️ Installation
+## ⚙️ Installation (Local Setup)
 
-### 1. Clone repository
+### 1. Clone the repository
 
 ```
 git clone https://github.com/your-username/your-repo.git
@@ -66,46 +67,81 @@ cd your-repo
 pip install -r requirements.txt
 ```
 
----
-
-## ▶️ Run the Application
+### 3. Run the app
 
 ```
-streamlit run app.py
+python app.py
 ```
 
 ---
 
-## 📊 How it Works
+## 🌐 Deployment
 
-1. User uploads an image
-2. Image is preprocessed
-3. CNN model analyzes eye alignment
-4. System outputs:
+This project is deployed using **Gradio on Hugging Face Spaces**.
 
-   * Normal / Strabismus
-   * Confidence percentage
-   * Detailed class probabilities
+👉 Live Demo: https://octane12v1-strabismus.hf.space/?__theme=system&deep_link=qjYHTZBxsAc
+
+---
+
+## 🧪 How It Works
+
+1. Upload an image
+2. Image is preprocessed (resized and normalized)
+3. Model predicts probabilities for each class
+4. System selects the **highest probability class (argmax)**
+5. Output:
+
+   * Final prediction (Normal / Strabismus)
+   * Predicted class
+   * Confidence score
+   * Probability graph
+
+---
+
+## 📊 Example Output
+
+* Prediction: NORMAL
+* Confidence: 92.45%
+* Graph showing class probabilities
 
 ---
 
 ## ⚠️ Disclaimer
 
-This system is intended for **educational and screening purposes only**.
-It is **not a substitute for professional medical diagnosis**.
+This is an AI-based screening tool and is **NOT intended for medical diagnosis**.
+Please consult a qualified medical professional for accurate evaluation.
 
 ---
 
 ## 📌 Dataset
 
-Dataset used from Kaggle (Strabismus image dataset).
+Dataset used from Kaggle :- https://www.kaggle.com/datasets/druthvikvarma/strabismus-dataset
 (Not included in repository due to size constraints)
+
+---
+
+## 🛠️ Tech Stack
+
+* Python
+* TensorFlow / Keras
+* Gradio
+* NumPy
+* Pillow
+* Matplotlib
 
 ---
 
 ## 👨‍💻 Author
 
-Your Name
+Nandakishore Nair
 
 ---
 
+## ⭐ Future Improvements
+
+* Real-time webcam detection
+* Mobile app integration
+* Improved dataset and accuracy
+* Medical-grade validation
+
+---
