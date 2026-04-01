@@ -1,4 +1,4 @@
-# StRaBisMuSv1
+# StRaBisMuSv1 App live link: https://octane12v1-strabismus.hf.space/?__theme=system&deep_link=qjYHTZBxsAc
 An ML opensource Project to check weather the human have Strabismus
 # 👁️ Strabismus Detection System
 
