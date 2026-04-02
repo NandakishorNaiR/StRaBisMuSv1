@@ -1,5 +1,5 @@
 # 👁️ Strabismus Detection System
-https://octane12v1-strabismus.hf.space/?__theme=system&deep_link=qjYHTZBxsAc
+https://octane12v1-strabismus.hf.space/?__theme=system&deep_link=l1zB0aqTsQI
 
 ## 📌 Overview
 
@@ -80,7 +80,7 @@ python app.py
 
 This project is deployed using **Gradio on Hugging Face Spaces**.
 
-👉 Live Demo: https://octane12v1-strabismus.hf.space/?__theme=system&deep_link=qjYHTZBxsAc
+👉 Live Demo: https://octane12v1-strabismus.hf.space/?__theme=system&deep_link=l1zB0aqTsQI
 
 ---
 
