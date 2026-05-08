@@ -1,6 +1,6 @@
 # 👁️ Strabismus Detection System
-https://octane12v1-strabismus.hf.space/?__theme=system&deep_link=zqhuu4rIkuk
-
+live link: https://octane12v1-strabismus.hf.space/?__theme=system&deep_link=zqhuu4rIkuk
+Documentation: https://drive.google.com/file/d/16o8GiT2mtSafhCmozGGLYOShXcq7-dVA/view?usp=sharing
 ## 📌 Overview
 
 This project is an AI-powered system that detects **strabismus (eye misalignment)** from facial images using deep learning.
