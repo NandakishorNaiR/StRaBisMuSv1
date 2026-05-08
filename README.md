@@ -1,5 +1,5 @@
 # 👁️ Strabismus Detection System
-https://octane12v1-strabismus.hf.space/?__theme=system&deep_link=IsNLDynXtt8
+https://octane12v1-strabismus.hf.space/?__theme=system&deep_link=zqhuu4rIkuk
 
 ## 📌 Overview
 
