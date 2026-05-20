@@ -1,52 +1,39 @@
-````md
----
-title: Strabismus Detection System
-emoji: 👁️
-colorFrom: blue
-colorTo: indigo
-sdk: gradio
-sdk_version: "6.0.0"
-python_version: "3.13"
-app_file: app.py
-pinned: false
----
-
 # 👁️ Strabismus Detection System
 
-AI-powered eye alignment screening application built using Deep Learning, TensorFlow, OpenCV, and Gradio for preliminary strabismus detection and classification.
+> AI-powered eye alignment screening application using Deep Learning, TensorFlow, OpenCV, and Gradio for preliminary strabismus detection and classification.
 
 ---
 
-# 🌐 Live Demo
+## 🌐 Live Demo
 
-https://octane12v1-strabismus.hf.space/
+🔗 https://octane12v1-strabismus.hf.space/
 
 ---
 
-# 📄 Documentation
+## 📄 Documentation
 
-https://drive.google.com/file/d/16w4agjpw9y0Z8e-mzaP_H1Sc-p76pqF5/view?usp=sharing
+📘 https://drive.google.com/file/d/16w4agjpw9y0Z8e-mzaP_H1Sc-p76pqF5/view?usp=sharing
 
 ---
 
 # 📌 Overview
 
-The **Strabismus Detection System** is an AI-powered healthcare screening application developed using **Deep Learning** and **Computer Vision** techniques.
+The **Strabismus Detection System** is an AI-powered healthcare screening application developed using **Deep Learning** and **Computer Vision**.
 
 The system analyzes eye alignment from facial images and predicts whether the eyes are:
 
-- NORMAL
-- ESOTROPIA
-- EXOTROPIA
-- HYPERTROPIA
-- HYPOTROPIA
+* NORMAL
+* ESOTROPIA
+* EXOTROPIA
+* HYPERTROPIA
+* HYPOTROPIA
 
 The application then determines whether the person has:
 
-- ✅ Normal Eye Alignment
-- ⚠️ Strabismus Detected
+* ✅ Normal Eye Alignment
+* ⚠️ Strabismus Detected
 
-This project demonstrates the practical implementation of Artificial Intelligence in medical image classification and preliminary healthcare screening.
+This project demonstrates the practical use of Artificial Intelligence in medical image classification and preliminary healthcare screening.
 
 ---
 
@@ -54,83 +41,83 @@ This project demonstrates the practical implementation of Artificial Intelligenc
 
 ## 🔍 Detection Features
 
-- Detects **Normal vs Strabismus**
-- Multi-class eye condition classification
-- Confidence-based prediction system
-- Argmax-based final prediction logic
-- Probability distribution graph visualization
+* Detects **Normal vs Strabismus**
+* Multi-class eye condition classification
+* Confidence-based prediction system
+* Argmax-based final prediction logic
+* Probability distribution graph visualization
 
 ---
 
 ## 📷 Input Features
 
-- 📁 Image Upload Support
-- 📷 Webcam Snapshot Capture
-- Browser Camera Integration
-- Live Snapshot Prediction
+* 📁 Upload facial or eye images
+* 📷 Webcam snapshot prediction
+* Browser camera integration
+* Live image capture support
 
 ---
 
 ## 🌐 Accessibility Features
 
-- Multi-language Interface Support
-- User-friendly AI screening workflow
-- Interactive Gradio UI
+* Multi-language interface support
+* Interactive and user-friendly Gradio UI
+* AI-based healthcare screening workflow
 
 ### Supported Languages
 
-- English
-- हिन्दी (Hindi)
-- मराठी (Marathi)
-- தமிழ் (Tamil)
-- తెలుగు (Telugu)
-- বাংলা (Bengali)
-- Español (Spanish)
-- Français (French)
-- العربية (Arabic)
-- 中文 (Chinese)
-- മലയാളം (Malayalam)
-- ಕನ್ನಡ (Kannada)
+* English
+* हिन्दी (Hindi)
+* मराठी (Marathi)
+* தமிழ் (Tamil)
+* తెలుగు (Telugu)
+* বাংলা (Bengali)
+* Español (Spanish)
+* Français (French)
+* العربية (Arabic)
+* 中文 (Chinese)
+* മലയാളം (Malayalam)
+* ಕನ್ನಡ (Kannada)
 
 ---
 
 ## 🛡️ AI Safety & Reliability Features
 
-- OpenCV-based eye validation
-- Human face and eye detection
-- Invalid image rejection
-- Safe TensorFlow model loading
-- Warm-up inference optimization
-- Thread-safe prediction handling
-- Memory-safe matplotlib rendering
-- CPU optimization for Hugging Face Spaces
+* OpenCV-based eye validation
+* Human face and eye detection
+* Invalid image rejection system
+* Safe TensorFlow model loading
+* Warm-up inference optimization
+* Thread-safe prediction handling
+* Memory-safe matplotlib rendering
+* CPU optimization for Hugging Face Spaces
 
 ---
 
 # 🧠 Model Details
 
-| Parameter | Value |
-|---|---|
-| Model | MobileNetV2 |
-| Framework | TensorFlow / Keras |
-| Architecture Type | CNN (Convolutional Neural Network) |
-| Technique | Transfer Learning |
-| Input Size | 224 × 224 |
-| Output Classes | 5 |
-| Prediction Logic | Argmax-based Classification |
-| Deployment | Gradio + Hugging Face Spaces |
+| Parameter        | Value                              |
+| ---------------- | ---------------------------------- |
+| Model            | MobileNetV2                        |
+| Framework        | TensorFlow / Keras                 |
+| Architecture     | CNN (Convolutional Neural Network) |
+| Technique        | Transfer Learning                  |
+| Input Size       | 224 × 224                          |
+| Output Classes   | 5                                  |
+| Prediction Logic | Argmax Classification              |
+| Deployment       | Gradio + Hugging Face Spaces       |
 
 ---
 
 # 🧠 AI Concepts Used
 
-- Deep Learning
-- CNN (Convolutional Neural Networks)
-- Transfer Learning
-- Image Classification
-- Feature Extraction
-- Softmax Classification
-- Computer Vision
+* Deep Learning
+* CNN (Convolutional Neural Networks)
+* Transfer Learning
+* Image Classification
+* Feature Extraction
+* Softmax Classification
+* Computer Vision
 
 ---
 
@@ -147,7 +134,7 @@ Strabismus/
 ├── models/
 │   ├── strabismus_model.keras
 │   └── class_indices.json
-````
+```
 
 ---
 
@@ -293,11 +280,9 @@ Users can capture live snapshots using browser webcam support.
 
 ### Dataset Source
 
-https://www.kaggle.com/datasets/druthvikvarma/strabismus-dataset
+🔗 https://www.kaggle.com/datasets/druthvikvarma/strabismus-dataset
 
----
-
-## Classes Used
+### Classes Used
 
 * NORMAL
 * ESOTROPIA
@@ -381,6 +366,3 @@ Please consult a qualified ophthalmologist or healthcare professional for proper
 * Kaggle Dataset Resources
 
 ---
-
-```
-```
