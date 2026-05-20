@@ -59,6 +59,7 @@ LANGUAGES = {
     "العربية":    "ar",
     "中文":        "zh",
     "മലയാളം":   "ml",
+    "ಕನ್ನಡ":      "kn",
 }
 
 T = {
@@ -81,6 +82,7 @@ T = {
         "analyze_webcam": "🔍 Analyze Snapshot",
         "no_snap":        "⚠️ No snapshot captured. Click the 📷 capture button first.",
         "disclaimer":     "⚠️ **Disclaimer:** This is an AI-based screening tool and is **NOT intended for medical diagnosis or clinical use**. Always consult a qualified ophthalmologist or medical professional for accurate diagnosis and treatment.",
+        "developer_info": "Developed and maintained by Knoxy Nexus",
         "chart_title":    "Class Probability Distribution",
         "chart_ylabel":   "Probability (%)",
         "lang_label":     "🌐 Language",
@@ -104,6 +106,7 @@ T = {
         "analyze_webcam": "🔍 स्नैपशॉट विश्लेषण",
         "no_snap":        "⚠️ कोई स्नैपशॉट नहीं। पहले 📷 बटन दबाएं।",
         "disclaimer":     "⚠️ **अस्वीकरण:** यह एक AI-आधारित स्क्रीनिंग टूल है और **चिकित्सा निदान के लिए नहीं** है। सटीक निदान के लिए किसी योग्य नेत्र विशेषज्ञ से परामर्श लें।",
+        "developer_info": "नॉक्सी नेक्सस (Knoxy Nexus) द्वारा विकसित और अनुरक्षित",
         "chart_title":    "वर्ग संभावना वितरण",
         "chart_ylabel":   "संभावना (%)",
         "lang_label":     "🌐 भाषा",
@@ -127,6 +130,7 @@ T = {
         "analyze_webcam": "🔍 स्नॅपशॉट विश्लेषण",
         "no_snap":        "⚠️ स्नॅपशॉट नाही. आधी 📷 बटण दाबा.",
         "disclaimer":     "⚠️ **अस्वीकरण:** हे AI-आधारित स्क्रीनिंग साधन आहे आणि **वैद्यकीय निदानासाठी नाही**. योग्य निदानासाठी नेत्रतज्ञाचा सल्ला घ्या.",
+        "developer_info": "नॉक्सी नेक्सस (Knoxy Nexus) द्वारे विकसित आणि देखरेख केलेले",
         "chart_title":    "वर्ग संभाव्यता वितरण",
         "chart_ylabel":   "संभाव्यता (%)",
         "lang_label":     "🌐 भाषा",
@@ -150,6 +154,7 @@ T = {
         "analyze_webcam": "🔍 ஸ்னாப்ஷாட் பகுப்பாய்வு",
         "no_snap":        "⚠️ ஸ்னாப்ஷாட் இல்லை. முதலில் 📷 பொத்தானை அழுத்தவும்.",
         "disclaimer":     "⚠️ **மறுப்பு:** இது AI அடிப்படையிலான திரையிடல் கருவி மற்றும் **மருத்துவ நோயறிதலுக்காக அல்ல**. சரியான நோயறிதலுக்கு கண் மருத்துவரை அணுகவும்.",
+        "developer_info": "Knoxy Nexus ஆல் உருவாக்கப்பட்டு பராமரிக்கப்படுகிறது",
         "chart_title":    "வகுப்பு நிகழ்தகவு விநியோகம்",
         "chart_ylabel":   "நிகழ்தகவு (%)",
         "lang_label":     "🌐 மொழி",
@@ -173,6 +178,7 @@ T = {
         "analyze_webcam": "🔍 స్నాప్‌షాట్ విశ్లేషణ",
         "no_snap":        "⚠️ స్నాప్‌షాట్ లేదు. ముందుగా 📷 బటన్ నొక్కండి.",
         "disclaimer":     "⚠️ **నిరాకరణ:** ఇది AI ఆధారిత స్క్రీనింగ్ సాధనం మరియు **వైద్య నిర్ధారణ కోసం కాదు**. సరైన నిర్ధారణ కోసం నేత్ర వైద్యుడిని సంప్రదించండి.",
+        "developer_info": "నాక్సీ నెక్సస్ (Knoxy Nexus) ద్వారా అభివృద్ధి చేయబడింది మరియు నిర్వహించబడుతుంది",
         "chart_title":    "తరగతి సంభావ్యత పంపిణీ",
         "chart_ylabel":   "సంభావ్యత (%)",
         "lang_label":     "🌐 భాష",
@@ -196,6 +202,7 @@ T = {
         "analyze_webcam": "🔍 স্ন্যাপশট বিশ্লেষণ",
         "no_snap":        "⚠️ কোনো স্ন্যাপশট নেই। প্রথমে 📷 বোতাম চাপুন।",
         "disclaimer":     "⚠️ **দাবিত্যাগ:** এটি একটি AI-ভিত্তিক স্ক্রীনিং টুল এবং **চিকিৎসা নির্ণয়ের জন্য নয়**। সঠিক নির্ণয়ের জন্য একজন চক্ষু বিশেষজ্ঞের পরামর্শ নিন।",
+        "developer_info": "নক্সি নেক্সাস (Knoxy Nexus) দ্বারা উন্নত এবং রক্ষণাবেক্ষণ করা হয়েছে",
         "chart_title":    "শ্রেণী সম্ভাবনা বিতরণ",
         "chart_ylabel":   "সম্ভাবনা (%)",
         "lang_label":     "🌐 ভাষা",
@@ -219,6 +226,7 @@ T = {
         "analyze_webcam": "🔍 Analizar Foto",
         "no_snap":        "⚠️ No hay foto. Haz clic en el botón 📷 primero.",
         "disclaimer":     "⚠️ **Aviso:** Esta es una herramienta de detección basada en IA y **NO está destinada a diagnóstico médico**. Consulta siempre a un oftalmólogo.",
+        "developer_info": "Desarrollado y mantenido por Knoxy Nexus",
         "chart_title":    "Distribución de Probabilidad",
         "chart_ylabel":   "Probabilidad (%)",
         "lang_label":     "🌐 Idioma",
@@ -241,6 +249,7 @@ T = {
         "cam_tip":        "ℹ️ Autorisez l'accès à la caméra. Cliquez sur 📷 puis sur **Analyser**.",
         "analyze_webcam": "🔍 Analyser la Photo",
         "no_snap":        "⚠️ Pas de photo. Cliquez d'abord sur 📷.",
+        "developer_info": "Développé et maintenu par Knoxy Nexus",
         "disclaimer":     "⚠️ **Avertissement:** Ceci est un outil de dépistage basé sur l'IA et **n'est pas destiné au diagnostic médical**. Consultez toujours un ophtalmologue.",
         "chart_title":    "Distribution des Probabilités",
         "chart_ylabel":   "Probabilité (%)",
@@ -265,6 +274,7 @@ T = {
         "analyze_webcam": "🔍 تحليل اللقطة",
         "no_snap":        "⚠️ لا توجد لقطة. انقر أولاً على 📷.",
         "disclaimer":     "⚠️ **إخلاء المسؤولية:** هذه أداة فحص قائمة على الذكاء الاصطناعي و**ليست مخصصة للتشخيص الطبي**. استشر دائماً طبيب عيون متخصصاً.",
+        "developer_info": "تم التطوير والصيانة بواسطة Knoxy Nexus",
         "chart_title":    "توزيع احتمالات الفئة",
         "chart_ylabel":   "الاحتمال (%)",
         "lang_label":     "🌐 اللغة",
@@ -288,6 +298,7 @@ T = {
         "analyze_webcam": "🔍 分析快照",
         "no_snap":        "⚠️ 没有快照。请先点击 📷 按钮。",
         "disclaimer":     "⚠️ **免责声明：** 这是一个基于AI的筛查工具，**不用于医疗诊断**。请始终咨询合格的眼科医生。",
+        "developer_info": "由 Knoxy Nexus 开发并维护",
         "chart_title":    "类别概率分布",
         "chart_ylabel":   "概率 (%)",
         "lang_label":     "🌐 语言",
@@ -311,10 +322,36 @@ T = {
         "analyze_webcam": "🔍 സ്നാപ്പ്ഷോട്ട് പരിശോധിക്കുക",
         "no_snap":        "⚠️ സ്നാപ്പ്ഷോട്ട് എടുത്തിട്ടില്ല. ആദ്യം 📷 ക്യാപ്ചർ ബട്ടൺ ക്ലിക്ക് ചെയ്യുക.",
         "disclaimer":     "⚠️ **നിരാകരണം (Disclaimer):** ഇതൊരു AI അധിഷ്ഠിത സ്ക്രീനിംഗ് ടൂൾ മാത്രമാണ്, **മെഡിക്കൽ രോഗനിർണ്ണയത്തിനോ ക്ലിനിക്കൽ ആവശ്യങ്ങൾക്കോ ഉള്ളതല്ല**. കൃത്യമായ രോഗനിർണ്ണയത്തിനും ചികിത്സയ്ക്കും എപ്പോഴും യോഗ്യതയുള്ള ഒരു ഒഫ്താൽമോളജിസ്റ്റിനെയോ (കണ്ണ് രോഗവിദഗ്ദ്ധൻ) മെഡിക്കൽ പ്രൊഫഷണലിനെയോ സമീപിക്കുക.",
+        "developer_info": "നോക്സി നെക്സസ് (Knoxy Nexus) വികസിപ്പിച്ചതും പരിപാലിക്കുന്നതും",
         "chart_title":    "ക്ലാസ് പ്രോബബിലിറ്റി ഡിസ്ട്രിബ്യൂഷൻ",
         "chart_ylabel":   "സാധ്യത (%)",
         "lang_label":     "🌐 ഭാഷ"
     },
+    "kn": {
+        "title":          "👁️ ಸ್ಕ್ವಿಂಟ್ (ಓರೆಗಣ್ಣು) ಪತ್ತೆ ಹಚ್ಚುವ ವ್ಯವಸ್ಥೆ",
+        "subtitle":       "ಕಣ್ಣುಗಳು **ಸಾಮಾನ್ಯವಾಗಿವೆಯೇ** ಅಥವಾ **ಓರೆಗಣ್ಣಿನ (Strabismus)** ಲಕ್ಷಣಗಳನ್ನು ಹೊಂದಿವೆಯೇ ಎಂದು ಪತ್ತೆ ಹಚ್ಚಲು ಕಣ್ಣಿನ ಚಿತ್ರವನ್ನು ಅಪ್‌ಲೋಡ್ ಮಾಡಿ ಅಥವಾ ವೆಬ್‌ಕ್ಯಾಮ್ ಬಳಸಿ.",
+        "what_title":     "### 👁️ ಓರೆಗಣ್ಣು (Strabismus) ಎಂದರೇನು?",
+        "what_body":      "**ಓರೆಗಣ್ಣು** ಎಂಬುದು ಎರಡು ಕಣ್ಣುಗಳು ಒಂದೇ ಸಮಯದಲ್ಲಿ ಒಂದೇ ಬಿಂದುವನ್ನು ನೋಡದ ಸ್ಥಿತಿಯಾಗಿದೆ. ಒಂದು ಕಣ್ಣು ನೇರವಾಗಿ ನೋಡುತ್ತಿರುವಾಗ, ಮತ್ತೊಂದು ಕಣ್ಣು ಒಳಗೆ, ಹೊರಗೆ, ಮೇಲಕ್ಕೆ ಅಥವಾ ಕೆಳಕ್ಕೆ ತಿರುಗಿರಬಹುದು.",
+        "types_title":    "#### ವಿಧಗಳು",
+        "types_body":     "- **ಈಸೋಟ್ರೋಪಿಯಾ (Esotropia)** — ಕಣ್ಣು *ಒಳಮುಖವಾಗಿ* ತಿರುಗುವುದು (ಮಕ್ಕಳಲ್ಲಿ ಹೆಚ್ಚು ಸಾಮಾನ್ಯ)\n- **ಎಕ್ಸೋಟ್ರೋಪಿಯಾ (Exotropia)** — ಕಣ್ಣು *ಹೊರಮುಖವಾಗಿ* ತಿರುಗುವುದು\n- **ಹೈಪರ್‌ಟ್ರೋಪಿಯಾ (Hypertropia)** — ಕಣ್ಣು *ಮೇಲ್ಮುಖವಾಗಿ* ತಿರುಗುವುದು\n- **ಹೈಪೋಟ್ರೋಪಿಯಾ (Hypotropia)** — ಕಣ್ಣು *ಕೆಳಮುಖವಾಗಿ* ತಿರುಗುವುದು\n\n> ಆರಂಭಿಕ ಪತ್ತೆ ಬಹಳ ಮುಖ್ಯ — ಚಿಕಿತ್ಸೆ ನೀಡದ ಓರೆಗಣ್ಣು ಆಂಬ್ಲಿಯೋಪಿಯಾ (ಸೋಮಾರಿ ಕಣ್ಣು) ಅಥವಾ ಶಾಶ್ವತ ದೃಷ್ಟಿ ದೋಷಕ್ಕೆ ಕಾರಣವಾಗಬಹುದು.",
+        "tab_upload":     "📁 ಚಿತ್ರವನ್ನು ಅಪ್‌ಲೋಡ್ ಮಾಡಿ",
+        "tab_webcam":     "📷 ವೆಬ್‌ಕ್ಯಾಮ್ ಮೂಲಕ ಸೆರೆಹಿಡಿಯಿರಿ",
+        "upload_label":   "ಕಣ್ಣಿನ ಚಿತ್ರವನ್ನು ಅಪ್‌ಲೋಡ್ ಮಾಡಿ",
+        "analyze_upload": "🔍 ಅಪ್‌ಲೋಡ್ ಮಾಡಿದ ಚಿತ್ರವನ್ನು ವಿಶ್ಲೇಷಿಸಿ",
+        "result_label":   "ಫಲಿತಾಂಶ",
+        "probs_label":    "ವರ್ಗೀಕರಣದ ಸಂಭವನೀಯತೆಗಳು",
+        "plot_label":     "ಸಂಭವನೀಯತೆಯ ಗ್ರಾಫ್",
+        "cam_label":      "ಲೈವ್ ಕ್ಯಾಮೆರಾ ಫೀಡ್",
+        "cam_tip":        "ℹ️ ಕೇಳಿದಾಗ ಕ್ಯಾಮೆರಾ ಬಳಸಲು ಅನುಮತಿ ನೀಡಿ. ಕ್ಯಾಮೆರಾ ಬಾಕ್ಸ್ ಒಳಗಿರುವ **📷 ಸ್ನ್ಯಾಪ್‌ಶಾಟ್** ಬಟನ್ ಕ್ಲಿಕ್ ಮಾಡಿ, ನಂತರ **ಸ್ನ್ಯಾಪ್‌ಶಾಟ್ ವಿಶ್ಲೇಷಿಸಿ** ಬಟನ್ ಒತ್ತಿ.",
+        "analyze_webcam": "🔍 ಸ್ನ್ಯಾಪ್‌ಶಾಟ್ ವಿಶ್ಲೇಷಿಸಿ",
+        "no_snap":        "⚠️ ಯಾವುದೇ ಸ್ನ್ಯಾಪ್‌ಶಾಟ್ ಸೆರೆಹಿಡಿದಿಲ್ಲ. ಮೊದಲು 📷 ಕ್ಯಾಪ್ಚರ್ ಬಟನ್ ಕ್ಲಿಕ್ ಮಾಡಿ.",
+        "disclaimer":     "⚠️ **ಹಕ್ಕು ನಿರಾಕರಣೆ:** ಇದು ಎಐ (AI) ಆಧಾರಿತ ಸ್ಕ್ರೀನಿಂಗ್ ಸಾಧನವಾಗಿದೆ ಮತ್ತು ಇದು **ವೈದ್ಯಕೀಯ ರೋಗನಿರ್ಣಯ ಅಥವಾ ಕ್ಲಿನಿಕಲ್ ಬಳಕೆಗೆ ಉದ್ದೇಶಿಸಿಲ್ಲ**. ನಿಖರವಾದ ರೋಗನಿರ್ಣಯ ಮತ್ತು ಚಿಕಿತ್ಸೆಗಾಗಿ ಯಾವಾಗಲೂ ಅರ್ಹ ನೇತ್ರ ತಜ್ಞರು ಅಥವಾ ವೈದ್ಯಕೀಯ ವೃತ್ತಿಪರರನ್ನು ಸಂಪರ್ಕಿಸಿ.",
+        "developer_info": "Knoxy Nexus ನಿಂದ ಅಭಿವೃದ್ಧಿಪಡಿಸಲಾಗಿದೆ ಮತ್ತು ನಿರ್ವಹಿಸಲ್ಪಡುತ್ತಿದೆ",
+        "chart_title":    "ವರ್ಗೀಕರಣದ ಸಂಭವನೀಯತೆಯ ಹಂಚಿಕೆ",
+        "chart_ylabel":   "ಸಂಭವನೀಯತೆ (%)",
+        "lang_label":     "🌐 ಭಾಷೆ"
+    },
+
 
 }
 
@@ -469,7 +506,8 @@ def change_language(lang):
         gr.update(label=t(lang, "result_label")),
         gr.update(label=t(lang, "probs_label")),
         gr.update(label=t(lang, "plot_label")),
-        gr.update(value=f"---\n> {t(lang, 'disclaimer')}"),
+        gr.update(value=f"---\n> {t(lang, 'disclaimer')}\n\n*{t(lang, 'developer_info')}*"),
+    
     )
 
 # =============================================================================
@@ -559,7 +597,10 @@ with gr.Blocks(title="👁️ Strabismus Detection System") as demo:
                 outputs=[webcam_result, webcam_probs, webcam_plot],
             )
 
-    disclaimer_md = gr.Markdown(f"---\n> {t('English', 'disclaimer')}")
+    disclaimer_md = gr.Markdown(
+        f"---\n> {t('English', 'disclaimer')}\n\n*{t('English', 'developer_info')}*"
+    )
+ 
 
     # Wire language switcher
     lang_dd.change(
@@ -585,5 +626,5 @@ demo.launch(
     server_port=7860,
     ssr_mode=False,
     show_error=True,
-    share=True,
+    
 )
