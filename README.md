@@ -12,11 +12,17 @@ pinned: false
 
 # 👁️ Strabismus Detection System
 
-## 🌐 Live Demo
+AI-powered eye alignment screening application built using Deep Learning, TensorFlow, OpenCV, and Gradio for preliminary strabismus detection and classification.
+
+---
+
+# 🌐 Live Demo
 
 https://octane12v1-strabismus.hf.space/
 
-## 📄 Documentation
+---
+
+# 📄 Documentation
 
 https://drive.google.com/file/d/16w4agjpw9y0Z8e-mzaP_H1Sc-p76pqF5/view?usp=sharing
 
@@ -39,35 +45,91 @@ The application then determines whether the person has:
 * ✅ Normal Eye Alignment
 * ⚠️ Strabismus Detected
 
-This project demonstrates the practical use of AI in medical image classification and preliminary healthcare screening.
+This project demonstrates the practical implementation of Artificial Intelligence in medical image classification and preliminary healthcare screening.
 
 ---
 
 # 🚀 Features
 
-* 🔍 Detects **Normal vs Strabismus**
-* 🧠 Multi-class eye condition classification
-* 📊 Displays confidence-based predictions
-* 📈 Generates probability distribution graphs
-* 📷 Supports **Webcam Capture**
-* 📁 Supports **Image Upload**
-* ⚡ Interactive Gradio UI
-* 🌐 Deployed on Hugging Face Spaces
-* 🛡️ Safe model loading and error handling
-* 🧹 Memory-safe matplotlib rendering
+## 🔍 Detection Features
+
+* Detects **Normal vs Strabismus**
+* Multi-class eye condition classification
+* Confidence-based prediction system
+* Argmax-based final prediction logic
+* Probability distribution graph visualization
+
+---
+
+## 📷 Input Features
+
+* 📁 Image Upload Support
+* 📷 Webcam Snapshot Capture
+* Browser Camera Integration
+* Live Snapshot Prediction
+
+---
+
+## 🌐 Accessibility Features
+
+* Multi-language Interface Support
+* User-friendly AI screening workflow
+* Interactive Gradio UI
+
+### Supported Languages
+
+* English
+* हिन्दी (Hindi)
+* मराठी (Marathi)
+* தமிழ் (Tamil)
+* తెలుగు (Telugu)
+* বাংলা (Bengali)
+* Español (Spanish)
+* Français (French)
+* العربية (Arabic)
+* 中文 (Chinese)
+* മലയാളം (Malayalam)
+* ಕನ್ನಡ (Kannada)
+
+---
+
+## 🛡️ AI Safety & Reliability Features
+
+* OpenCV-based eye validation
+* Human face and eye detection
+* Invalid image rejection
+* Safe TensorFlow model loading
+* Warm-up inference optimization
+* Thread-safe prediction handling
+* Memory-safe matplotlib rendering
+* CPU optimization for Hugging Face Spaces
 
 ---
 
 # 🧠 Model Details
 
-| Parameter        | Value                       |
-| ---------------- | --------------------------- |
-| Model            | MobileNetV2                 |
-| Framework        | TensorFlow / Keras          |
-| Technique        | Transfer Learning           |
-| Input Size       | 224 × 224                   |
-| Output Classes   | 5                           |
+| Parameter | Value |
+|---|---|
+| Model | MobileNetV2 |
+| Framework | TensorFlow / Keras |
+| Architecture Type | CNN (Convolutional Neural Network) |
+| Technique | Transfer Learning |
+| Input Size | 224 × 224 |
+| Output Classes | 5 |
 | Prediction Logic | Argmax-based Classification |
+| Deployment | Gradio + Hugging Face Spaces |
+
+---
+
+# 🧠 AI Concepts Used
+
+* Deep Learning
+* CNN (Convolutional Neural Networks)
+* Transfer Learning
+* Image Classification
+* Feature Extraction
+* Softmax Classification
+* Computer Vision
 
 ---
 
@@ -78,181 +140,9 @@ Strabismus/
 │
 ├── app.py
 ├── requirements.txt
+├── README.md
+├── eye.ipynb
+│
 ├── models/
 │   ├── strabismus_model.keras
 │   └── class_indices.json
-├── eye.ipynb
-├── README.md
-```
-
----
-
-# ⚙️ Installation (Local Setup)
-
-## 1️⃣ Clone Repository
-
-```bash
-git clone https://github.com/your-username/your-repo.git
-cd your-repo
-```
-
-## 2️⃣ Install Dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
-## 3️⃣ Run Application
-
-```bash
-python app.py
-```
-
----
-
-# 🌐 Deployment
-
-The application is deployed using:
-
-* Gradio
-* Hugging Face Spaces
-
-### 🔗 Live App
-
-https://octane12v1-strabismus.hf.space/
-
----
-
-# 🧪 How the System Works
-
-1. User uploads image or captures webcam snapshot
-2. Image is resized and normalized
-3. Deep learning model predicts probabilities
-4. Highest probability class is selected using **Argmax**
-5. Application displays:
-
-   * Final prediction
-   * Predicted class
-   * Confidence score
-   * Probability graph
-
----
-
-# 📊 Example Output
-
-```text
-Prediction   : ⚠️ STRABISMUS DETECTED
-Class        : HYPOTROPIA
-Confidence   : 82.45%
-```
-
-The system also generates a probability distribution graph for all classes.
-
----
-
-# 📷 Input Modes
-
-## 📁 Upload Image
-
-Users can upload eye or facial images directly from local storage.
-
-## 📷 Webcam Capture
-
-Users can capture live snapshots using browser webcam support.
-
----
-
-# 🛠️ Tech Stack
-
-## Programming & AI
-
-* Python
-* TensorFlow
-* Keras
-* NumPy
-
-## Visualization & Image Processing
-
-* Matplotlib
-* Pillow (PIL)
-
-## Deployment & Interface
-
-* Gradio
-* Hugging Face Spaces
-
-## Version Control
-
-* Git
-* GitHub
-
----
-
-# 📌 Dataset
-
-Dataset Source:
-https://www.kaggle.com/datasets/druthvikvarma/strabismus-dataset
-
-### Classes Used
-
-* NORMAL
-* ESOTROPIA
-* EXOTROPIA
-* HYPERTROPIA
-* HYPOTROPIA
-
-> Dataset is not included in the repository due to size limitations.
-
----
-
-# ⚠️ Limitations
-
-* Not intended for clinical diagnosis
-* Accuracy depends on image quality
-* Blurry or low-light images may reduce prediction reliability
-* Limited by dataset diversity and size
-
----
-
-# ⭐ Future Improvements
-
-* Real-time video stream detection
-* Eye landmark detection
-* OpenCV-based blur detection
-* Automatic eye-region cropping
-* Improved dataset diversity
-* Mobile application integration
-* Clinical validation support
-* Attention-based deep learning models
-
----
-
-# ⚠️ Disclaimer
-
-This is an AI-based screening and educational tool.
-
-It is **NOT intended for:**
-
-* Medical diagnosis
-* Clinical treatment
-* Professional healthcare replacement
-
-Please consult a qualified ophthalmologist or healthcare professional for proper diagnosis and treatment.
-
----
-
-# 👨‍💻 Author
-
-**Nandakishore Nair**
-
----
-
-# 📚 References
-
-* TensorFlow Documentation
-* Keras Documentation
-* Gradio Documentation
-* Hugging Face Spaces Documentation
-* Kaggle Dataset Resources
-
----
