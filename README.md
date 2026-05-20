@@ -146,3 +146,144 @@ Strabismus/
 ├── models/
 │   ├── strabismus_model.keras
 │   └── class_indices.json
+
+
+
+⚙️ Installation (Local Setup)
+1️⃣ Clone Repository
+git clone https://github.com/your-username/your-repo.git
+cd your-repo
+2️⃣ Create Virtual Environment
+Windows
+python -m venv venv
+venv\Scripts\activate
+Linux / macOS
+python3 -m venv venv
+source venv/bin/activate
+3️⃣ Install Dependencies
+pip install -r requirements.txt
+4️⃣ Run Application
+python app.py
+🌐 Deployment
+
+The application is deployed using:
+
+Gradio
+Hugging Face Spaces
+🔗 Live Application
+
+https://octane12v1-strabismus.hf.space/
+
+🧪 How the System Works
+User uploads image or captures webcam snapshot
+OpenCV validates face and eye presence
+Image is resized and normalized
+TensorFlow model predicts class probabilities
+Highest probability class is selected using Argmax
+Application displays:
+Final Prediction
+Predicted Class
+Confidence Score
+Probability Distribution Graph
+📊 Example Output
+Prediction   : ⚠️ STRABISMUS DETECTED
+Class        : HYPOTROPIA
+Confidence   : 82.45%
+
+The system also generates a probability graph for all classes.
+
+📷 Input Modes
+📁 Upload Image
+
+Users can upload facial or eye images directly from local storage.
+
+📷 Webcam Capture
+
+Users can capture live snapshots using browser webcam support.
+
+🛠️ Tech Stack
+Programming & AI
+Python
+TensorFlow
+Keras
+NumPy
+Computer Vision & Image Processing
+OpenCV
+Pillow (PIL)
+Visualization
+Matplotlib
+Interface & Deployment
+Gradio
+Hugging Face Spaces
+Version Control
+Git
+GitHub
+📌 Dataset
+Dataset Source
+
+https://www.kaggle.com/datasets/druthvikvarma/strabismus-dataset
+
+Classes Used
+NORMAL
+ESOTROPIA
+EXOTROPIA
+HYPERTROPIA
+HYPOTROPIA
+
+Dataset is not included in the repository due to size limitations.
+
+⚡ Performance Optimizations
+
+The application includes several deployment and runtime optimizations:
+
+TensorFlow CPU optimization
+Controlled threading configuration
+Concurrent request handling
+Warmed-up model inference
+Hugging Face Spaces compatibility patches
+Memory-safe graph rendering
+Reduced CPU overhead
+
+These optimizations improve stability for multiple concurrent users.
+
+⚠️ Limitations
+Not intended for clinical diagnosis
+Accuracy depends on image quality
+Blurry or low-light images may reduce prediction reliability
+Dataset diversity limitations
+Sensitive to improper face positioning
+⭐ Future Improvements
+Real-time video stream detection
+Eye landmark detection
+OpenCV blur detection
+Automatic eye-region cropping
+Larger medical datasets
+Attention-based deep learning models
+Mobile application integration
+Clinical validation support
+Real-time eye tracking
+Telemedicine integration
+⚠️ Disclaimer
+
+This is an AI-based screening and educational tool.
+
+It is NOT intended for:
+
+Medical diagnosis
+Clinical treatment
+Professional healthcare replacement
+
+Please consult a qualified ophthalmologist or healthcare professional for proper diagnosis and treatment.
+
+👨‍💻 Author
+
+Nandakishore Nair
+
+📚 References
+TensorFlow Documentation
+Keras Documentation
+OpenCV Documentation
+Gradio Documentation
+Hugging Face Spaces Documentation
+MobileNetV2 Research Paper
+Kaggle Dataset Resources
