@@ -1,358 +1,456 @@
 import os
 os.environ["GRADIO_ANALYTICS_ENABLED"] = "False"
-os.environ["GRADIO_ALLOW_FLAGGING"] = "never"
-os.environ["GRADIO_TEMP_DIR"] = "/tmp"
-os.environ["GRADIO_WATCH_DIRS"] = ""
+os.environ["GRADIO_ALLOW_FLAGGING"]    = "never"
+os.environ["GRADIO_TEMP_DIR"]          = "/tmp"
+os.environ["GRADIO_WATCH_DIRS"]        = ""
 # Tuned for HF CPU Basic: 2 vCPU / 16 GB RAM
-os.environ["TF_NUM_INTRAOP_THREADS"] = "1"
-os.environ["TF_NUM_INTEROP_THREADS"] = "1"
-os.environ["TF_ENABLE_ONEDNN_OPTS"]  = "0"
-os.environ["OMP_NUM_THREADS"]        = "1"
-os.environ["OPENBLAS_NUM_THREADS"]   = "1"
+os.environ["TF_NUM_INTRAOP_THREADS"]   = "1"
+os.environ["TF_NUM_INTEROP_THREADS"]   = "1"
+os.environ["TF_ENABLE_ONEDNN_OPTS"]    = "0"
+os.environ["OMP_NUM_THREADS"]          = "1"
+os.environ["OPENBLAS_NUM_THREADS"]     = "1"
 
-# ── Patch: stub out the entire `spaces` package before gradio imports it ────
-# Problem: Python 3.13 + spaces/_vendor/codefind crashes on TF _DictWrapper.
-# Gradio also calls spaces.gradio_auto_wrap() — so we must stub the full
-# spaces module with all attributes gradio expects, not just spaces.reloading.
+# ── Stub spaces package (Python 3.13 + codefind crash fix) ───────────────────
 import sys, types
-
-def _noop(*args, **kwargs):
-    # passthrough wrapper — returns the function unchanged
-    return args[0] if args else None
-
-_spaces = types.ModuleType("spaces")
-_spaces.gradio_auto_wrap  = _noop   # called by gradio block_function.py
-_spaces.GPU               = _noop   # decorator used in some HF demos
-_spaces.zero              = types.SimpleNamespace(gradio_auto_wrap=_noop)
-
-_spaces_reload = types.ModuleType("spaces.reloading")
+def _noop(*args, **kwargs): return args[0] if args else None
+_spaces                          = types.ModuleType("spaces")
+_spaces.gradio_auto_wrap         = _noop
+_spaces.GPU                      = _noop
+_spaces.zero                     = types.SimpleNamespace(gradio_auto_wrap=_noop)
+_spaces_reload                   = types.ModuleType("spaces.reloading")
 _spaces_reload.start_reload_server = lambda **kw: None
-
-sys.modules["spaces"]           = _spaces
-sys.modules["spaces.reloading"] = _spaces_reload
+sys.modules["spaces"]            = _spaces
+sys.modules["spaces.reloading"]  = _spaces_reload
 # ─────────────────────────────────────────────────────────────────────────────
 
 import gradio as gr
 import numpy as np
 import tensorflow as tf
 from PIL import Image
-import json, cv2, threading
+import cv2, threading
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-# ── Thread-safe lock ───────────────────────────────────────────────────────────
 _predict_lock = threading.Lock()
+
+# =============================================================================
+# Model  —  Binary sigmoid output  (0 = NORMAL, 1 = STRABISMUS)
+# Model file: models/strabismus_binary_model.keras
+# Input:  224 × 224 × 3  float32  (values 0–1)
+# Output: shape (1,)  sigmoid  →  probability of STRABISMUS
+# =============================================================================
+model = None
+
+def load_model_safe():
+    global model
+    try:
+        model = tf.keras.models.load_model("models/strabismus_binary_model.keras")
+        # Warm-up: one dummy pass so first real user isn't slow
+        dummy = np.zeros((1, 224, 224, 3), dtype=np.float32)
+        model.predict(dummy, verbose=0)
+        print("Model loaded and warmed up.")
+    except Exception as e:
+        print(f"Model loading failed: {e}")
+        model = None
+
+load_model_safe()
+
+# =============================================================================
+# OpenCV eye / face validation  (gate: reject non-eye images)
+# =============================================================================
+_EYE_CASCADE  = cv2.CascadeClassifier(
+    cv2.data.haarcascades + "haarcascade_eye.xml")
+_FACE_CASCADE = cv2.CascadeClassifier(
+    cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+
+def _contains_human_eye(pil_img):
+    """
+    Returns (True, "") if human eye found, else (False, reason).
+    Two-pass: face→eye first, then full-image eye scan for close-up shots.
+    """
+    gray = cv2.cvtColor(np.array(pil_img.convert("RGB")), cv2.COLOR_RGB2GRAY)
+    gray = cv2.equalizeHist(gray)
+
+    faces = _FACE_CASCADE.detectMultiScale(gray, 1.1, 5, minSize=(60, 60))
+    if len(faces) > 0:
+        for (fx, fy, fw, fh) in faces:
+            eyes = _EYE_CASCADE.detectMultiScale(
+                gray[fy:fy+fh, fx:fx+fw], 1.1, 4, minSize=(20, 20))
+            if len(eyes) > 0:
+                return True, ""
+        return False, (
+            "Face detected but eyes not visible.\n"
+            "Please ensure both eyes are open and well-lit."
+        )
+
+    eyes = _EYE_CASCADE.detectMultiScale(gray, 1.05, 6, minSize=(30, 30))
+    if len(eyes) > 0:
+        return True, ""
+
+    return False, (
+        "No human eyes detected in this image.\n"
+        "Please upload a clear eye photo with good lighting.\n"
+        "Tips: face the camera directly, keep eyes open, avoid blur."
+    )
+
+# =============================================================================
+# Preprocessing
+# =============================================================================
+def _preprocess(pil_img):
+    """Resize to 224×224, normalise to [0,1], add batch dimension."""
+    if max(pil_img.size) > 512:
+        pil_img.thumbnail((512, 512), Image.BILINEAR)
+    arr = np.array(pil_img.resize((224, 224), Image.BILINEAR), dtype=np.float32)
+    return np.expand_dims(arr / 255.0, axis=0)
+
+# =============================================================================
+# Core prediction
+# =============================================================================
+def _predict(pil_img, lang):
+    """
+    Returns (result_text, confidence_bar_fig, result_class)
+    result_class: "normal" | "strabismus" | "error" | "invalid"
+    """
+    if model is None:
+        return t(lang, "err_no_model"), None, "error"
+    if pil_img is None:
+        return "", None, "idle"
+
+    try:
+        img = pil_img.convert("RGB")
+        if max(img.size) > 640:
+            img.thumbnail((640, 640), Image.BILINEAR)
+
+        # Gate: must contain a human eye
+        ok, reason = _contains_human_eye(img)
+        if not ok:
+            return f"{t(lang, 'err_no_eye')}\n\n{reason}", None, "invalid"
+
+        # Inference
+        with _predict_lock:
+            prob_strab = float(model.predict(_preprocess(img), verbose=0)[0][0])
+
+        prob_normal  = 1.0 - prob_strab
+        is_strabismus = prob_strab >= 0.5
+        label         = "STRABISMUS" if is_strabismus else "NORMAL"
+        confidence    = prob_strab * 100 if is_strabismus else prob_normal * 100
+        result_class  = "strabismus" if is_strabismus else "normal"
+        icon          = "⚠️" if is_strabismus else "✅"
+
+        result_text = (
+            f"{t(lang, 'pred_label')}   : {icon} {label}\n"
+            f"{t(lang, 'conf_label')}   : {confidence:.1f}%\n"
+            f"{t(lang, 'prob_strab')}   : {prob_strab*100:.1f}%\n"
+            f"{t(lang, 'prob_normal')}  : {prob_normal*100:.1f}%"
+        )
+
+        # Confidence bar chart
+        fig, ax = plt.subplots(figsize=(5, 2.8))
+        labels  = [t(lang, "class_normal"), t(lang, "class_strab")]
+        values  = [prob_normal * 100, prob_strab * 100]
+        colors  = ["#2ecc71", "#e74c3c"]
+        bars    = ax.bar(labels, values, color=colors, edgecolor="white", linewidth=0.8, width=0.5)
+        ax.set_ylim(0, 100)
+        ax.set_ylabel(t(lang, "chart_ylabel"), fontsize=9)
+        ax.set_title(t(lang, "chart_title"), fontsize=10)
+        for bar, val in zip(bars, values):
+            ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 1.5,
+                    f"{val:.1f}%", ha="center", va="bottom", fontsize=9, fontweight="bold")
+        fig.tight_layout()
+
+        return result_text, fig, result_class
+
+    except Exception as e:
+        return f"❌ {t(lang, 'err_predict')}: {e}", None, "error"
+    finally:
+        plt.close("all")
+
+# =============================================================================
+# Gradio tab wrappers
+# =============================================================================
+def predict_upload(img, lang):
+    return _predict(img, lang)
+
+def predict_webcam(img, lang):
+    if img is None:
+        return t(lang, "no_snap"), None, "idle"
+    return _predict(Image.fromarray(img.astype("uint8")), lang)
 
 # =============================================================================
 # Translations
 # =============================================================================
 LANGUAGES = {
-    "English":    "en",
-    "हिन्दी":      "hi",
-    "मराठी":       "mr",
-    "தமிழ்":       "ta",
-    "తెలుగు":      "te",
-    "বাংলা":       "bn",
-    "Español":    "es",
-    "Français":   "fr",
-    "العربية":    "ar",
-    "中文":        "zh",
-    "മലയാളം":   "ml",
-    "ಕನ್ನಡ":      "kn",
+    "English":  "en", "हिन्दी":  "hi", "मराठी":  "mr",
+    "தமிழ்":    "ta", "తెలుగు": "te", "বাংলা":  "bn",
+    "Español":  "es", "Français":"fr", "العربية": "ar",
+    "中文":     "zh", "മലയാളം": "ml", "ಕನ್ನಡ":   "kn",
 }
 
 T = {
     "en": {
-        "title":          "👁️ Strabismus Detection System",
-        "subtitle":       "Upload an eye image or use your webcam to detect whether the eyes are **normal** or show signs of **strabismus**.",
-        "what_title":     "### 👁️ What is Strabismus?",
-        "what_body":      "**Strabismus** (crossed eyes) is a condition where both eyes do not look at the same point at the same time. One eye may turn inward, outward, upward, or downward while the other looks straight ahead.",
-        "types_title":    "#### Types",
-        "types_body":     "- **Esotropia** — eye turns *inward* (most common in children)\n- **Exotropia** — eye turns *outward*\n- **Hypertropia** — eye turns *upward*\n- **Hypotropia** — eye turns *downward*\n\n> Early detection matters — untreated strabismus can lead to amblyopia (lazy eye) or permanent vision loss.",
-        "tab_upload":     "📁 Upload Image",
-        "tab_webcam":     "📷 Webcam Capture",
-        "upload_label":   "Upload Eye Image",
-        "analyze_upload": "🔍 Analyze Uploaded Image",
-        "result_label":   "Result",
-        "probs_label":    "Class Probabilities",
-        "plot_label":     "Probability Graph",
-        "cam_label":      "Live Camera Feed",
-        "cam_tip":        "ℹ️ Allow camera access when prompted. Click the **📷 snapshot** button inside the camera box, then press **Analyze Snapshot**.",
-        "analyze_webcam": "🔍 Analyze Snapshot",
-        "no_snap":        "⚠️ No snapshot captured. Click the 📷 capture button first.",
-        "disclaimer":     "⚠️ **Disclaimer:** This is an AI-based screening tool and is **NOT intended for medical diagnosis or clinical use**. Always consult a qualified ophthalmologist or medical professional for accurate diagnosis and treatment.",
-        "developer_info": "Developed and maintained by Knoxy Nexus",
-        "chart_title":    "Class Probability Distribution",
-        "chart_ylabel":   "Probability (%)",
-        "lang_label":     "🌐 Language",
+        "title":         "👁️ Strabismus Detection System",
+        "subtitle":      "Upload an eye image or use your webcam to detect whether the eyes are **normal** or show signs of **strabismus**.",
+        "what_title":    "### 👁️ What is Strabismus?",
+        "what_body":     "**Strabismus** (crossed eyes) is a condition where both eyes do not look at the same point at the same time. One eye may turn inward, outward, upward, or downward while the other looks straight ahead.",
+        "types_title":   "#### Types",
+        "types_body":    "- **Esotropia** — eye turns *inward* (most common in children)\n- **Exotropia** — eye turns *outward*\n- **Hypertropia** — eye turns *upward*\n- **Hypotropia** — eye turns *downward*\n\n> Early detection matters — untreated strabismus can lead to amblyopia (lazy eye) or permanent vision loss.",
+        "tab_upload":    "📁 Upload Image",
+        "tab_webcam":    "📷 Webcam Capture",
+        "upload_label":  "Upload Eye Image",
+        "btn_upload":    "🔍 Analyze Image",
+        "btn_webcam":    "🔍 Analyze Snapshot",
+        "result_label":  "Result",
+        "plot_label":    "Confidence Chart",
+        "cam_label":     "Live Camera Feed",
+        "cam_tip":       "ℹ️ Allow camera access, click the **📷 snapshot** button, then press **Analyze Snapshot**.",
+        "no_snap":       "⚠️ No snapshot captured. Click the 📷 button first.",
+        "disclaimer":    "⚠️ **Disclaimer:** This is an AI-based screening tool and is **NOT intended for medical diagnosis or clinical use**. Always consult a qualified ophthalmologist for accurate diagnosis and treatment.",
+        "developer_info":"Developed and maintained by Knoxy Nexus",
+        "lang_label":    "🌐 Language",
+        "pred_label":    "Prediction",
+        "conf_label":    "Confidence",
+        "prob_strab":    "P(Strabismus)",
+        "prob_normal":   "P(Normal)   ",
+        "class_normal":  "Normal",
+        "class_strab":   "Strabismus",
+        "chart_title":   "Class Probabilities",
+        "chart_ylabel":  "Probability (%)",
+        "err_no_model":  "❌ Model not loaded. Please restart the app.",
+        "err_no_eye":    "❌ Invalid Image",
+        "err_predict":   "Prediction error",
     },
     "hi": {
-        "title":          "👁️ स्ट्रैबिस्मस डिटेक्शन सिस्टम",
-        "subtitle":       "आंखों की छवि अपलोड करें या वेबकैम का उपयोग करें — यह पता लगाने के लिए कि आंखें **सामान्य** हैं या **स्ट्रैबिस्मस** के लक्षण हैं।",
-        "what_title":     "### 👁️ स्ट्रैबिस्मस क्या है?",
-        "what_body":      "**स्ट्रैबिस्मस** (भेंगापन) एक ऐसी स्थिति है जिसमें दोनों आँखें एक ही समय में एक ही बिंदु पर नहीं देखतीं। एक आँख अंदर, बाहर, ऊपर या नीचे मुड़ सकती है।",
-        "types_title":    "#### प्रकार",
-        "types_body":     "- **एसोट्रोपिया** — आँख *अंदर* मुड़ती है (बच्चों में सबसे आम)\n- **एक्सोट्रोपिया** — आँख *बाहर* मुड़ती है\n- **हाइपरट्रोपिया** — आँख *ऊपर* मुड़ती है\n- **हाइपोट्रोपिया** — आँख *नीचे* मुड़ती है\n\n> जल्दी पहचान ज़रूरी है — उपचार न होने पर आलसी आँख या स्थायी दृष्टि हानि हो सकती है।",
-        "tab_upload":     "📁 छवि अपलोड करें",
-        "tab_webcam":     "📷 वेबकैम",
-        "upload_label":   "आँख की छवि अपलोड करें",
-        "analyze_upload": "🔍 विश्लेषण करें",
-        "result_label":   "परिणाम",
-        "probs_label":    "वर्ग संभावनाएँ",
-        "plot_label":     "संभावना ग्राफ",
-        "cam_label":      "लाइव कैमरा",
-        "cam_tip":        "ℹ️ कैमरा अनुमति दें। कैमरा बॉक्स में 📷 बटन दबाएं, फिर **विश्लेषण करें** दबाएं।",
-        "analyze_webcam": "🔍 स्नैपशॉट विश्लेषण",
-        "no_snap":        "⚠️ कोई स्नैपशॉट नहीं। पहले 📷 बटन दबाएं।",
-        "disclaimer":     "⚠️ **अस्वीकरण:** यह एक AI-आधारित स्क्रीनिंग टूल है और **चिकित्सा निदान के लिए नहीं** है। सटीक निदान के लिए किसी योग्य नेत्र विशेषज्ञ से परामर्श लें।",
-        "developer_info": "नॉक्सी नेक्सस (Knoxy Nexus) द्वारा विकसित और अनुरक्षित",
-        "chart_title":    "वर्ग संभावना वितरण",
-        "chart_ylabel":   "संभावना (%)",
-        "lang_label":     "🌐 भाषा",
+        "title":         "👁️ स्ट्रैबिस्मस डिटेक्शन सिस्टम",
+        "subtitle":      "आंखों की छवि अपलोड करें या वेबकैम का उपयोग करें।",
+        "what_title":    "### 👁️ स्ट्रैबिस्मस क्या है?",
+        "what_body":     "**स्ट्रैबिस्मस** (भेंगापन) — दोनों आँखें एक ही बिंदु पर नहीं देखतीं।",
+        "types_title":   "#### प्रकार",
+        "types_body":    "- **एसोट्रोपिया** — आँख *अंदर*\n- **एक्सोट्रोपिया** — आँख *बाहर*\n- **हाइपरट्रोपिया** — आँख *ऊपर*\n- **हाइपोट्रोपिया** — आँख *नीचे*\n\n> जल्दी पहचान ज़रूरी है।",
+        "tab_upload":    "📁 छवि अपलोड", "tab_webcam": "📷 वेबकैम",
+        "upload_label":  "आँख की छवि", "btn_upload": "🔍 विश्लेषण करें", "btn_webcam": "🔍 स्नैपशॉट विश्लेषण",
+        "result_label":  "परिणाम", "plot_label": "आत्मविश्वास चार्ट",
+        "cam_label":     "लाइव कैमरा", "cam_tip": "ℹ️ 📷 बटन दबाएं, फिर विश्लेषण करें।",
+        "no_snap":       "⚠️ कोई स्नैपशॉट नहीं।",
+        "disclaimer":    "⚠️ **अस्वीकरण:** यह AI स्क्रीनिंग टूल है, चिकित्सा निदान के लिए नहीं।",
+        "developer_info":"नॉक्सी नेक्सस द्वारा विकसित",
+        "lang_label":    "🌐 भाषा",
+        "pred_label":    "भविष्यवाणी", "conf_label": "आत्मविश्वास",
+        "prob_strab":    "P(स्ट्रैबिस्मस)", "prob_normal": "P(सामान्य)    ",
+        "class_normal":  "सामान्य", "class_strab": "स्ट्रैबिस्मस",
+        "chart_title":   "वर्ग संभावनाएँ", "chart_ylabel": "संभावना (%)",
+        "err_no_model":  "❌ मॉडल लोड नहीं हुआ।", "err_no_eye": "❌ अमान्य छवि", "err_predict": "भविष्यवाणी त्रुटि",
     },
     "mr": {
-        "title":          "👁️ स्ट्रॅबिस्मस डिटेक्शन सिस्टम",
-        "subtitle":       "डोळ्याची प्रतिमा अपलोड करा किंवा वेबकॅम वापरा — डोळे **सामान्य** आहेत की **स्ट्रॅबिस्मस** आहे हे तपासण्यासाठी।",
-        "what_title":     "### 👁️ स्ट्रॅबिस्मस म्हणजे काय?",
-        "what_body":      "**स्ट्रॅबिस्मस** (तिरळे डोळे) ही अशी स्थिती आहे जिथे दोन्ही डोळे एकाच वेळी एकाच बिंदूकडे पाहत नाहीत। एक डोळा आत, बाहेर, वर किंवा खाली वळतो।",
-        "types_title":    "#### प्रकार",
-        "types_body":     "- **एसोट्रोपिया** — डोळा *आत* वळतो\n- **एक्सोट्रोपिया** — डोळा *बाहेर* वळतो\n- **हायपरट्रोपिया** — डोळा *वर* वळतो\n- **हायपोट्रोपिया** — डोळा *खाली* वळतो\n\n> लवकर ओळख महत्त्वाची — उपचार न केल्यास दृष्टी कमी होऊ शकते।",
-        "tab_upload":     "📁 प्रतिमा अपलोड करा",
-        "tab_webcam":     "📷 वेबकॅम",
-        "upload_label":   "डोळ्याची प्रतिमा अपलोड करा",
-        "analyze_upload": "🔍 विश्लेषण करा",
-        "result_label":   "निकाल",
-        "probs_label":    "वर्ग संभाव्यता",
-        "plot_label":     "संभाव्यता आलेख",
-        "cam_label":      "लाइव्ह कॅमेरा",
-        "cam_tip":        "ℹ️ कॅमेरा परवानगी द्या. कॅमेरा बॉक्समध्ये 📷 बटण दाबा, नंतर **विश्लेषण करा** दाबा.",
-        "analyze_webcam": "🔍 स्नॅपशॉट विश्लेषण",
-        "no_snap":        "⚠️ स्नॅपशॉट नाही. आधी 📷 बटण दाबा.",
-        "disclaimer":     "⚠️ **अस्वीकरण:** हे AI-आधारित स्क्रीनिंग साधन आहे आणि **वैद्यकीय निदानासाठी नाही**. योग्य निदानासाठी नेत्रतज्ञाचा सल्ला घ्या.",
-        "developer_info": "नॉक्सी नेक्सस (Knoxy Nexus) द्वारे विकसित आणि देखरेख केलेले",
-        "chart_title":    "वर्ग संभाव्यता वितरण",
-        "chart_ylabel":   "संभाव्यता (%)",
-        "lang_label":     "🌐 भाषा",
+        "title":         "👁️ स्ट्रॅबिस्मस डिटेक्शन सिस्टम",
+        "subtitle":      "डोळ्याची प्रतिमा अपलोड करा किंवा वेबकॅम वापरा।",
+        "what_title":    "### 👁️ स्ट्रॅबिस्मस म्हणजे काय?",
+        "what_body":     "**स्ट्रॅबिस्मस** (तिरळे डोळे) — एक डोळा आत, बाहेर, वर किंवा खाली वळतो.",
+        "types_title":   "#### प्रकार",
+        "types_body":    "- **एसोट्रोपिया** — आत\n- **एक्सोट्रोपिया** — बाहेर\n- **हायपरट्रोपिया** — वर\n- **हायपोट्रोपिया** — खाली\n\n> लवकर ओळख महत्त्वाची.",
+        "tab_upload":    "📁 प्रतिमा अपलोड", "tab_webcam": "📷 वेबकॅम",
+        "upload_label":  "डोळ्याची प्रतिमा", "btn_upload": "🔍 विश्लेषण करा", "btn_webcam": "🔍 स्नॅपशॉट विश्लेषण",
+        "result_label":  "निकाल", "plot_label": "विश्वास चार्ट",
+        "cam_label":     "लाइव्ह कॅमेरा", "cam_tip": "ℹ️ 📷 बटण दाबा नंतर विश्लेषण करा.",
+        "no_snap":       "⚠️ स्नॅपशॉट नाही.",
+        "disclaimer":    "⚠️ **अस्वीकरण:** वैद्यकीय निदानासाठी नाही.",
+        "developer_info":"नॉक्सी नेक्सस द्वारे विकसित",
+        "lang_label":    "🌐 भाषा",
+        "pred_label":    "भविष्यवाणी", "conf_label": "आत्मविश्वास",
+        "prob_strab":    "P(स्ट्रॅबिस्मस)", "prob_normal": "P(सामान्य)      ",
+        "class_normal":  "सामान्य", "class_strab": "स्ट्रॅबिस्मस",
+        "chart_title":   "वर्ग संभाव्यता", "chart_ylabel": "संभाव्यता (%)",
+        "err_no_model":  "❌ मॉडेल लोड झाले नाही.", "err_no_eye": "❌ अवैध प्रतिमा", "err_predict": "भविष्यवाणी त्रुटी",
     },
     "ta": {
-        "title":          "👁️ ஸ்ட்ரபிஸ்மஸ் கண்டறிதல் அமைப்பு",
-        "subtitle":       "கண் படத்தை பதிவேற்றவும் அல்லது வெப்கேமை பயன்படுத்தவும் — கண்கள் **சாதாரணமாக** உள்ளதா அல்லது **ஸ்ட்ரபிஸ்மஸ்** அறிகுறிகள் உள்ளதா என்று கண்டறிய.",
-        "what_title":     "### 👁️ ஸ்ட்ரபிஸ்மஸ் என்றால் என்ன?",
-        "what_body":      "**ஸ்ட்ரபிஸ்மஸ்** (கோணல் கண்) என்பது இரண்டு கண்களும் ஒரே நேரத்தில் ஒரே புள்ளியை பார்க்காத நிலை. ஒரு கண் உள்ளே, வெளியே, மேலே அல்லது கீழே திரும்பலாம்.",
-        "types_title":    "#### வகைகள்",
-        "types_body":     "- **எசோட்ரோபியா** — கண் *உள்ளே* திரும்பும்\n- **எக்சோட்ரோபியா** — கண் *வெளியே* திரும்பும்\n- **ஹைபர்ட்ரோபியா** — கண் *மேலே* திரும்பும்\n- **ஹைபோட்ரோபியா** — கண் *கீழே* திரும்பும்\n\n> முன்கூட்டிய கண்டறிதல் முக்கியம் — சிகிச்சையில்லாமல் பார்வை இழப்பு ஏற்படலாம்.",
-        "tab_upload":     "📁 படம் பதிவேற்று",
-        "tab_webcam":     "📷 வெப்கேம்",
-        "upload_label":   "கண் படத்தை பதிவேற்றவும்",
-        "analyze_upload": "🔍 பகுப்பாய்வு செய்",
-        "result_label":   "முடிவு",
-        "probs_label":    "வகுப்பு நிகழ்தகவுகள்",
-        "plot_label":     "நிகழ்தகவு வரைபடம்",
-        "cam_label":      "நேரடி கேமரா",
-        "cam_tip":        "ℹ️ கேமரா அணுகலை அனுமதிக்கவும். 📷 பொத்தானை அழுத்தி, **பகுப்பாய்வு** அழுத்தவும்.",
-        "analyze_webcam": "🔍 ஸ்னாப்ஷாட் பகுப்பாய்வு",
-        "no_snap":        "⚠️ ஸ்னாப்ஷாட் இல்லை. முதலில் 📷 பொத்தானை அழுத்தவும்.",
-        "disclaimer":     "⚠️ **மறுப்பு:** இது AI அடிப்படையிலான திரையிடல் கருவி மற்றும் **மருத்துவ நோயறிதலுக்காக அல்ல**. சரியான நோயறிதலுக்கு கண் மருத்துவரை அணுகவும்.",
-        "developer_info": "Knoxy Nexus ஆல் உருவாக்கப்பட்டு பராமரிக்கப்படுகிறது",
-        "chart_title":    "வகுப்பு நிகழ்தகவு விநியோகம்",
-        "chart_ylabel":   "நிகழ்தகவு (%)",
-        "lang_label":     "🌐 மொழி",
+        "title":         "👁️ ஸ்ட்ரபிஸ்மஸ் கண்டறிதல் அமைப்பு",
+        "subtitle":      "கண் படத்தை பதிவேற்றவும் அல்லது வெப்கேமை பயன்படுத்தவும்.",
+        "what_title":    "### 👁️ ஸ்ட்ரபிஸ்மஸ் என்றால் என்ன?",
+        "what_body":     "**ஸ்ட்ரபிஸ்மஸ்** — ஒரு கண் உள்ளே, வெளியே, மேலே அல்லது கீழே திரும்பும்.",
+        "types_title":   "#### வகைகள்",
+        "types_body":    "- **எசோட்ரோபியா** — உள்ளே\n- **எக்சோட்ரோபியா** — வெளியே\n- **ஹைபர்ட்ரோபியா** — மேலே\n- **ஹைபோட்ரோபியா** — கீழே",
+        "tab_upload":    "📁 படம் பதிவேற்று", "tab_webcam": "📷 வெப்கேம்",
+        "upload_label":  "கண் படம்", "btn_upload": "🔍 பகுப்பாய்வு", "btn_webcam": "🔍 பகுப்பாய்வு",
+        "result_label":  "முடிவு", "plot_label": "நம்பிக்கை விளக்கப்படம்",
+        "cam_label":     "நேரடி கேமரா", "cam_tip": "ℹ️ 📷 அழுத்தி பகுப்பாய்வு செய்யவும்.",
+        "no_snap":       "⚠️ ஸ்னாப்ஷாட் இல்லை.",
+        "disclaimer":    "⚠️ **மறுப்பு:** மருத்துவ நோயறிதலுக்காக அல்ல.",
+        "developer_info":"Knoxy Nexus ஆல் உருவாக்கப்பட்டது",
+        "lang_label":    "🌐 மொழி",
+        "pred_label":    "கணிப்பு", "conf_label": "நம்பிக்கை",
+        "prob_strab":    "P(ஸ்ட்ரபிஸ்மஸ்)", "prob_normal": "P(சாதாரணம்)   ",
+        "class_normal":  "சாதாரணம்", "class_strab": "ஸ்ட்ரபிஸ்மஸ்",
+        "chart_title":   "வகுப்பு நிகழ்தகவுகள்", "chart_ylabel": "நிகழ்தகவு (%)",
+        "err_no_model":  "❌ மாதிரி ஏற்றப்படவில்லை.", "err_no_eye": "❌ தவறான படம்", "err_predict": "கணிப்பு பிழை",
     },
     "te": {
-        "title":          "👁️ స్ట్రాబిస్మస్ డిటెక్షన్ సిస్టమ్",
-        "subtitle":       "కంటి చిత్రాన్ని అప్‌లోడ్ చేయండి లేదా వెబ్‌క్యామ్ ఉపయోగించండి — కళ్ళు **సాధారణంగా** ఉన్నాయా లేదా **స్ట్రాబిస్మస్** లక్షణాలు ఉన్నాయా అని తెలుసుకోండి.",
-        "what_title":     "### 👁️ స్ట్రాబిస్మస్ అంటే ఏమిటి?",
-        "what_body":      "**స్ట్రాబిస్మస్** (వాలుకన్ను) అనేది రెండు కళ్ళూ ఒకే సమయంలో ఒకే బిందువును చూడని స్థితి. ఒక కన్ను లోపలికి, బయటకి, పైకి లేదా కిందికి తిరగవచ్చు.",
-        "types_title":    "#### రకాలు",
-        "types_body":     "- **ఎసోట్రోపియా** — కన్ను *లోపలికి* తిరుగుతుంది\n- **ఎక్సోట్రోపియా** — కన్ను *బయటికి* తిరుగుతుంది\n- **హైపర్‌ట్రోపియా** — కన్ను *పైకి* తిరుగుతుంది\n- **హైపోట్రోపియా** — కన్ను *కిందికి* తిరుగుతుంది\n\n> ముందస్తు గుర్తింపు ముఖ్యం — చికిత్స లేకుండా దృష్టి నష్టం జరగవచ్చు.",
-        "tab_upload":     "📁 చిత్రం అప్‌లోడ్",
-        "tab_webcam":     "📷 వెబ్‌క్యామ్",
-        "upload_label":   "కంటి చిత్రాన్ని అప్‌లోడ్ చేయండి",
-        "analyze_upload": "🔍 విశ్లేషించు",
-        "result_label":   "ఫలితం",
-        "probs_label":    "తరగతి సంభావ్యతలు",
-        "plot_label":     "సంభావ్యత గ్రాఫ్",
-        "cam_label":      "లైవ్ కెమెరా",
-        "cam_tip":        "ℹ️ కెమెరా అనుమతి ఇవ్వండి. 📷 బటన్ నొక్కి, **విశ్లేషించు** నొక్కండి.",
-        "analyze_webcam": "🔍 స్నాప్‌షాట్ విశ్లేషణ",
-        "no_snap":        "⚠️ స్నాప్‌షాట్ లేదు. ముందుగా 📷 బటన్ నొక్కండి.",
-        "disclaimer":     "⚠️ **నిరాకరణ:** ఇది AI ఆధారిత స్క్రీనింగ్ సాధనం మరియు **వైద్య నిర్ధారణ కోసం కాదు**. సరైన నిర్ధారణ కోసం నేత్ర వైద్యుడిని సంప్రదించండి.",
-        "developer_info": "నాక్సీ నెక్సస్ (Knoxy Nexus) ద్వారా అభివృద్ధి చేయబడింది మరియు నిర్వహించబడుతుంది",
-        "chart_title":    "తరగతి సంభావ్యత పంపిణీ",
-        "chart_ylabel":   "సంభావ్యత (%)",
-        "lang_label":     "🌐 భాష",
+        "title":         "👁️ స్ట్రాబిస్మస్ డిటెక్షన్ సిస్టమ్",
+        "subtitle":      "కంటి చిత్రాన్ని అప్‌లోడ్ చేయండి లేదా వెబ్‌క్యామ్ ఉపయోగించండి.",
+        "what_title":    "### 👁️ స్ట్రాబిస్మస్ అంటే ఏమిటి?",
+        "what_body":     "**స్ట్రాబిస్మస్** — ఒక కన్ను లోపలికి, బయటికి, పైకి లేదా కిందికి తిరగవచ్చు.",
+        "types_title":   "#### రకాలు",
+        "types_body":    "- **ఎసోట్రోపియా** — లోపలికి\n- **ఎక్సోట్రోపియా** — బయటికి\n- **హైపర్‌ట్రోపియా** — పైకి\n- **హైపోట్రోపియా** — కిందికి",
+        "tab_upload":    "📁 అప్‌లోడ్", "tab_webcam": "📷 వెబ్‌క్యామ్",
+        "upload_label":  "కంటి చిత్రం", "btn_upload": "🔍 విశ్లేషించు", "btn_webcam": "🔍 విశ్లేషించు",
+        "result_label":  "ఫలితం", "plot_label": "విశ్వాస చార్ట్",
+        "cam_label":     "లైవ్ కెమెరా", "cam_tip": "ℹ️ 📷 నొక్కి విశ్లేషించండి.",
+        "no_snap":       "⚠️ స్నాప్‌షాట్ లేదు.",
+        "disclaimer":    "⚠️ **నిరాకరణ:** వైద్య నిర్ధారణ కోసం కాదు.",
+        "developer_info":"Knoxy Nexus ద్వారా అభివృద్ధి",
+        "lang_label":    "🌐 భాష",
+        "pred_label":    "అంచనా", "conf_label": "విశ్వాసం",
+        "prob_strab":    "P(స్ట్రాబిస్మస్)", "prob_normal": "P(సాధారణం)    ",
+        "class_normal":  "సాధారణం", "class_strab": "స్ట్రాబిస్మస్",
+        "chart_title":   "తరగతి సంభావ్యతలు", "chart_ylabel": "సంభావ్యత (%)",
+        "err_no_model":  "❌ మోడల్ లోడ్ కాలేదు.", "err_no_eye": "❌ చెల్లని చిత్రం", "err_predict": "అంచనా లోపం",
     },
     "bn": {
-        "title":          "👁️ স্ট্র্যাবিসমাস ডিটেকশন সিস্টেম",
-        "subtitle":       "একটি চোখের ছবি আপলোড করুন বা ওয়েবক্যাম ব্যবহার করুন — চোখ **স্বাভাবিক** না **স্ট্র্যাবিসমাস** আছে কিনা জানতে।",
-        "what_title":     "### 👁️ স্ট্র্যাবিসমাস কী?",
-        "what_body":      "**স্ট্র্যাবিসমাস** (বাঁকা চোখ) এমন একটি অবস্থা যেখানে উভয় চোখ একই সময়ে একই বিন্দুতে দেখে না। একটি চোখ ভেতরে, বাইরে, উপরে বা নিচে ঘুরতে পারে।",
-        "types_title":    "#### ধরন",
-        "types_body":     "- **এসোট্রোপিয়া** — চোখ *ভেতরে* ঘোরে\n- **এক্সোট্রোপিয়া** — চোখ *বাইরে* ঘোরে\n- **হাইপারট্রোপিয়া** — চোখ *উপরে* ঘোরে\n- **হাইপোট্রোপিয়া** — চোখ *নিচে* ঘোরে\n\n> প্রাথমিক সনাক্তকরণ গুরুত্বপূর্ণ — চিকিৎসা না হলে দৃষ্টিশক্তি হারাতে পারে।",
-        "tab_upload":     "📁 ছবি আপলোড",
-        "tab_webcam":     "📷 ওয়েবক্যাম",
-        "upload_label":   "চোখের ছবি আপলোড করুন",
-        "analyze_upload": "🔍 বিশ্লেষণ করুন",
-        "result_label":   "ফলাফল",
-        "probs_label":    "শ্রেণী সম্ভাবনা",
-        "plot_label":     "সম্ভাবনা গ্রাফ",
-        "cam_label":      "লাইভ ক্যামেরা",
-        "cam_tip":        "ℹ️ ক্যামেরার অনুমতি দিন। 📷 বোতাম চাপুন, তারপর **বিশ্লেষণ করুন** চাপুন।",
-        "analyze_webcam": "🔍 স্ন্যাপশট বিশ্লেষণ",
-        "no_snap":        "⚠️ কোনো স্ন্যাপশট নেই। প্রথমে 📷 বোতাম চাপুন।",
-        "disclaimer":     "⚠️ **দাবিত্যাগ:** এটি একটি AI-ভিত্তিক স্ক্রীনিং টুল এবং **চিকিৎসা নির্ণয়ের জন্য নয়**। সঠিক নির্ণয়ের জন্য একজন চক্ষু বিশেষজ্ঞের পরামর্শ নিন।",
-        "developer_info": "নক্সি নেক্সাস (Knoxy Nexus) দ্বারা উন্নত এবং রক্ষণাবেক্ষণ করা হয়েছে",
-        "chart_title":    "শ্রেণী সম্ভাবনা বিতরণ",
-        "chart_ylabel":   "সম্ভাবনা (%)",
-        "lang_label":     "🌐 ভাষা",
+        "title":         "👁️ স্ট্র্যাবিসমাস ডিটেকশন সিস্টেম",
+        "subtitle":      "চোখের ছবি আপলোড করুন বা ওয়েবক্যাম ব্যবহার করুন।",
+        "what_title":    "### 👁️ স্ট্র্যাবিসমাস কী?",
+        "what_body":     "**স্ট্র্যাবিসমাস** — একটি চোখ ভেতরে, বাইরে, উপরে বা নিচে ঘোরে।",
+        "types_title":   "#### ধরন",
+        "types_body":    "- **এসোট্রোপিয়া** — ভেতরে\n- **এক্সোট্রোপিয়া** — বাইরে\n- **হাইপারট্রোপিয়া** — উপরে\n- **হাইপোট্রোপিয়া** — নিচে",
+        "tab_upload":    "📁 আপলোড", "tab_webcam": "📷 ওয়েবক্যাম",
+        "upload_label":  "চোখের ছবি", "btn_upload": "🔍 বিশ্লেষণ", "btn_webcam": "🔍 বিশ্লেষণ",
+        "result_label":  "ফলাফল", "plot_label": "আস্থা চার্ট",
+        "cam_label":     "লাইভ ক্যামেরা", "cam_tip": "ℹ️ 📷 বোতাম চাপুন তারপর বিশ্লেষণ করুন।",
+        "no_snap":       "⚠️ স্ন্যাপশট নেই।",
+        "disclaimer":    "⚠️ **দাবিত্যাগ:** চিকিৎসা নির্ণয়ের জন্য নয়।",
+        "developer_info":"Knoxy Nexus দ্বারা উন্নত",
+        "lang_label":    "🌐 ভাষা",
+        "pred_label":    "পূর্বাভাস", "conf_label": "আস্থা",
+        "prob_strab":    "P(স্ট্র্যাবিসমাস)", "prob_normal": "P(স্বাভাবিক)   ",
+        "class_normal":  "স্বাভাবিক", "class_strab": "স্ট্র্যাবিসমাস",
+        "chart_title":   "শ্রেণী সম্ভাবনা", "chart_ylabel": "সম্ভাবনা (%)",
+        "err_no_model":  "❌ মডেল লোড হয়নি।", "err_no_eye": "❌ অবৈধ ছবি", "err_predict": "পূর্বাভাস ত্রুটি",
     },
     "es": {
-        "title":          "👁️ Sistema de Detección de Estrabismo",
-        "subtitle":       "Sube una imagen del ojo o usa la cámara web para detectar si los ojos son **normales** o muestran signos de **estrabismo**.",
-        "what_title":     "### 👁️ ¿Qué es el Estrabismo?",
-        "what_body":      "El **estrabismo** (ojos bizcos) es una condición en la que ambos ojos no miran al mismo punto al mismo tiempo. Un ojo puede girar hacia adentro, afuera, arriba o abajo.",
-        "types_title":    "#### Tipos",
-        "types_body":     "- **Esotropia** — el ojo gira *hacia adentro*\n- **Exotropia** — el ojo gira *hacia afuera*\n- **Hipertropia** — el ojo gira *hacia arriba*\n- **Hipotropia** — el ojo gira *hacia abajo*\n\n> La detección temprana es crucial — sin tratamiento puede causar ambliopía o pérdida permanente de visión.",
-        "tab_upload":     "📁 Subir Imagen",
-        "tab_webcam":     "📷 Cámara Web",
-        "upload_label":   "Subir imagen del ojo",
-        "analyze_upload": "🔍 Analizar Imagen",
-        "result_label":   "Resultado",
-        "probs_label":    "Probabilidades de Clase",
-        "plot_label":     "Gráfico de Probabilidades",
-        "cam_label":      "Cámara en Vivo",
-        "cam_tip":        "ℹ️ Permite el acceso a la cámara. Haz clic en el botón 📷 y luego en **Analizar**.",
-        "analyze_webcam": "🔍 Analizar Foto",
-        "no_snap":        "⚠️ No hay foto. Haz clic en el botón 📷 primero.",
-        "disclaimer":     "⚠️ **Aviso:** Esta es una herramienta de detección basada en IA y **NO está destinada a diagnóstico médico**. Consulta siempre a un oftalmólogo.",
-        "developer_info": "Desarrollado y mantenido por Knoxy Nexus",
-        "chart_title":    "Distribución de Probabilidad",
-        "chart_ylabel":   "Probabilidad (%)",
-        "lang_label":     "🌐 Idioma",
+        "title":         "👁️ Sistema de Detección de Estrabismo",
+        "subtitle":      "Sube una imagen del ojo o usa la cámara web.",
+        "what_title":    "### 👁️ ¿Qué es el Estrabismo?",
+        "what_body":     "**Estrabismo** — un ojo puede girar hacia adentro, afuera, arriba o abajo.",
+        "types_title":   "#### Tipos",
+        "types_body":    "- **Esotropia** — adentro\n- **Exotropia** — afuera\n- **Hipertropia** — arriba\n- **Hipotropia** — abajo",
+        "tab_upload":    "📁 Subir Imagen", "tab_webcam": "📷 Cámara Web",
+        "upload_label":  "Imagen del ojo", "btn_upload": "🔍 Analizar", "btn_webcam": "🔍 Analizar",
+        "result_label":  "Resultado", "plot_label": "Gráfico de Confianza",
+        "cam_label":     "Cámara en Vivo", "cam_tip": "ℹ️ Haz clic en 📷 y luego analiza.",
+        "no_snap":       "⚠️ Sin foto capturada.",
+        "disclaimer":    "⚠️ **Aviso:** No para diagnóstico médico.",
+        "developer_info":"Desarrollado por Knoxy Nexus",
+        "lang_label":    "🌐 Idioma",
+        "pred_label":    "Predicción", "conf_label": "Confianza",
+        "prob_strab":    "P(Estrabismo)", "prob_normal": "P(Normal)     ",
+        "class_normal":  "Normal", "class_strab": "Estrabismo",
+        "chart_title":   "Probabilidades", "chart_ylabel": "Probabilidad (%)",
+        "err_no_model":  "❌ Modelo no cargado.", "err_no_eye": "❌ Imagen inválida", "err_predict": "Error de predicción",
     },
     "fr": {
-        "title":          "👁️ Système de Détection du Strabisme",
-        "subtitle":       "Téléchargez une image de l'œil ou utilisez la webcam pour détecter si les yeux sont **normaux** ou présentent des signes de **strabisme**.",
-        "what_title":     "### 👁️ Qu'est-ce que le Strabisme ?",
-        "what_body":      "Le **strabisme** (yeux croisés) est une condition où les deux yeux ne regardent pas le même point en même temps. Un œil peut se tourner vers l'intérieur, l'extérieur, le haut ou le bas.",
-        "types_title":    "#### Types",
-        "types_body":     "- **Ésotropie** — l'œil se tourne *vers l'intérieur*\n- **Exotropie** — l'œil se tourne *vers l'extérieur*\n- **Hypertropie** — l'œil se tourne *vers le haut*\n- **Hypotropie** — l'œil se tourne *vers le bas*\n\n> La détection précoce est essentielle — sans traitement, cela peut causer une amblyopie ou une perte permanente de la vision.",
-        "tab_upload":     "📁 Télécharger une Image",
-        "tab_webcam":     "📷 Webcam",
-        "upload_label":   "Télécharger l'image de l'œil",
-        "analyze_upload": "🔍 Analyser l'Image",
-        "result_label":   "Résultat",
-        "probs_label":    "Probabilités de Classe",
-        "plot_label":     "Graphique de Probabilité",
-        "cam_label":      "Caméra en Direct",
-        "cam_tip":        "ℹ️ Autorisez l'accès à la caméra. Cliquez sur 📷 puis sur **Analyser**.",
-        "analyze_webcam": "🔍 Analyser la Photo",
-        "no_snap":        "⚠️ Pas de photo. Cliquez d'abord sur 📷.",
-        "developer_info": "Développé et maintenu par Knoxy Nexus",
-        "disclaimer":     "⚠️ **Avertissement:** Ceci est un outil de dépistage basé sur l'IA et **n'est pas destiné au diagnostic médical**. Consultez toujours un ophtalmologue.",
-        "chart_title":    "Distribution des Probabilités",
-        "chart_ylabel":   "Probabilité (%)",
-        "lang_label":     "🌐 Langue",
+        "title":         "👁️ Système de Détection du Strabisme",
+        "subtitle":      "Téléchargez une image ou utilisez la webcam.",
+        "what_title":    "### 👁️ Qu'est-ce que le Strabisme ?",
+        "what_body":     "**Strabisme** — un œil se tourne vers l'intérieur, l'extérieur, le haut ou le bas.",
+        "types_title":   "#### Types",
+        "types_body":    "- **Ésotropie** — intérieur\n- **Exotropie** — extérieur\n- **Hypertropie** — haut\n- **Hypotropie** — bas",
+        "tab_upload":    "📁 Télécharger", "tab_webcam": "📷 Webcam",
+        "upload_label":  "Image de l'œil", "btn_upload": "🔍 Analyser", "btn_webcam": "🔍 Analyser",
+        "result_label":  "Résultat", "plot_label": "Graphique de Confiance",
+        "cam_label":     "Caméra en Direct", "cam_tip": "ℹ️ Cliquez sur 📷 puis analyser.",
+        "no_snap":       "⚠️ Pas de photo capturée.",
+        "disclaimer":    "⚠️ **Avertissement:** Non destiné au diagnostic médical.",
+        "developer_info":"Développé par Knoxy Nexus",
+        "lang_label":    "🌐 Langue",
+        "pred_label":    "Prédiction", "conf_label": "Confiance",
+        "prob_strab":    "P(Strabisme)", "prob_normal": "P(Normal)    ",
+        "class_normal":  "Normal", "class_strab": "Strabisme",
+        "chart_title":   "Probabilités", "chart_ylabel": "Probabilité (%)",
+        "err_no_model":  "❌ Modèle non chargé.", "err_no_eye": "❌ Image invalide", "err_predict": "Erreur de prédiction",
     },
     "ar": {
-        "title":          "👁️ نظام الكشف عن الحول",
-        "subtitle":       "قم بتحميل صورة للعين أو استخدم كاميرا الويب للكشف عما إذا كانت العيون **طبيعية** أم تُظهر علامات **الحول**.",
-        "what_title":     "### 👁️ ما هو الحول؟",
-        "what_body":      "**الحول** هو حالة لا تنظر فيها العينان إلى نفس النقطة في نفس الوقت. قد تنحرف إحدى العينين إلى الداخل أو الخارج أو الأعلى أو الأسفل.",
-        "types_title":    "#### الأنواع",
-        "types_body":     "- **الحول الداخلي (Esotropia)** — العين تنحرف *للداخل*\n- **الحول الخارجي (Exotropia)** — العين تنحرف *للخارج*\n- **الحول العلوي (Hypertropia)** — العين تنحرف *للأعلى*\n- **الحول السفلي (Hypotropia)** — العين تنحرف *للأسفل*\n\n> الكشف المبكر مهم — بدون علاج قد يؤدي إلى كسل العين أو فقدان البصر الدائم.",
-        "tab_upload":     "📁 تحميل صورة",
-        "tab_webcam":     "📷 كاميرا الويب",
-        "upload_label":   "تحميل صورة العين",
-        "analyze_upload": "🔍 تحليل الصورة",
-        "result_label":   "النتيجة",
-        "probs_label":    "احتمالات الفئة",
-        "plot_label":     "رسم الاحتمالات",
-        "cam_label":      "الكاميرا المباشرة",
-        "cam_tip":        "ℹ️ اسمح بالوصول إلى الكاميرا. انقر على 📷 ثم على **تحليل**.",
-        "analyze_webcam": "🔍 تحليل اللقطة",
-        "no_snap":        "⚠️ لا توجد لقطة. انقر أولاً على 📷.",
-        "disclaimer":     "⚠️ **إخلاء المسؤولية:** هذه أداة فحص قائمة على الذكاء الاصطناعي و**ليست مخصصة للتشخيص الطبي**. استشر دائماً طبيب عيون متخصصاً.",
-        "developer_info": "تم التطوير والصيانة بواسطة Knoxy Nexus",
-        "chart_title":    "توزيع احتمالات الفئة",
-        "chart_ylabel":   "الاحتمال (%)",
-        "lang_label":     "🌐 اللغة",
+        "title":         "👁️ نظام الكشف عن الحول",
+        "subtitle":      "قم بتحميل صورة للعين أو استخدم الكاميرا.",
+        "what_title":    "### 👁️ ما هو الحول؟",
+        "what_body":     "**الحول** — تنحرف إحدى العينين للداخل أو الخارج أو الأعلى أو الأسفل.",
+        "types_title":   "#### الأنواع",
+        "types_body":    "- **داخلي** — للداخل\n- **خارجي** — للخارج\n- **علوي** — للأعلى\n- **سفلي** — للأسفل",
+        "tab_upload":    "📁 تحميل", "tab_webcam": "📷 كاميرا",
+        "upload_label":  "صورة العين", "btn_upload": "🔍 تحليل", "btn_webcam": "🔍 تحليل",
+        "result_label":  "النتيجة", "plot_label": "مخطط الثقة",
+        "cam_label":     "الكاميرا المباشرة", "cam_tip": "ℹ️ انقر على 📷 ثم تحليل.",
+        "no_snap":       "⚠️ لا توجد لقطة.",
+        "disclaimer":    "⚠️ **إخلاء:** غير مخصص للتشخيص الطبي.",
+        "developer_info":"تم التطوير بواسطة Knoxy Nexus",
+        "lang_label":    "🌐 اللغة",
+        "pred_label":    "التنبؤ", "conf_label": "الثقة",
+        "prob_strab":    "P(الحول)   ", "prob_normal": "P(طبيعي)   ",
+        "class_normal":  "طبيعي", "class_strab": "حول",
+        "chart_title":   "احتمالات الفئة", "chart_ylabel": "الاحتمال (%)",
+        "err_no_model":  "❌ النموذج غير محمل.", "err_no_eye": "❌ صورة غير صالحة", "err_predict": "خطأ في التنبؤ",
     },
     "zh": {
-        "title":          "👁️ 斜视检测系统",
-        "subtitle":       "上传眼睛图片或使用摄像头，检测眼睛是否**正常**或显示**斜视**迹象。",
-        "what_title":     "### 👁️ 什么是斜视？",
-        "what_body":      "**斜视**（对眼）是一种两眼无法同时注视同一点的眼部疾病。一只眼睛可能向内、向外、向上或向下偏转。",
-        "types_title":    "#### 类型",
-        "types_body":     "- **内斜视 (Esotropia)** — 眼睛*向内*偏转\n- **外斜视 (Exotropia)** — 眼睛*向外*偏转\n- **上斜视 (Hypertropia)** — 眼睛*向上*偏转\n- **下斜视 (Hypotropia)** — 眼睛*向下*偏转\n\n> 早期发现至关重要 — 若不治疗可能导致弱视或永久性视力丧失。",
-        "tab_upload":     "📁 上传图片",
-        "tab_webcam":     "📷 摄像头",
-        "upload_label":   "上传眼睛图片",
-        "analyze_upload": "🔍 分析图片",
-        "result_label":   "结果",
-        "probs_label":    "类别概率",
-        "plot_label":     "概率图表",
-        "cam_label":      "实时摄像头",
-        "cam_tip":        "ℹ️ 允许摄像头访问。点击 📷 快照按钮，然后点击**分析**。",
-        "analyze_webcam": "🔍 分析快照",
-        "no_snap":        "⚠️ 没有快照。请先点击 📷 按钮。",
-        "disclaimer":     "⚠️ **免责声明：** 这是一个基于AI的筛查工具，**不用于医疗诊断**。请始终咨询合格的眼科医生。",
-        "developer_info": "由 Knoxy Nexus 开发并维护",
-        "chart_title":    "类别概率分布",
-        "chart_ylabel":   "概率 (%)",
-        "lang_label":     "🌐 语言",
+        "title":         "👁️ 斜视检测系统",
+        "subtitle":      "上传眼睛图片或使用摄像头检测斜视。",
+        "what_title":    "### 👁️ 什么是斜视？",
+        "what_body":     "**斜视** — 一只眼睛可能向内、向外、向上或向下偏转。",
+        "types_title":   "#### 类型",
+        "types_body":    "- **内斜视** — 向内\n- **外斜视** — 向外\n- **上斜视** — 向上\n- **下斜视** — 向下",
+        "tab_upload":    "📁 上传", "tab_webcam": "📷 摄像头",
+        "upload_label":  "眼睛图片", "btn_upload": "🔍 分析", "btn_webcam": "🔍 分析",
+        "result_label":  "结果", "plot_label": "置信度图",
+        "cam_label":     "实时摄像头", "cam_tip": "ℹ️ 点击 📷 然后分析。",
+        "no_snap":       "⚠️ 没有快照。",
+        "disclaimer":    "⚠️ **免责声明：** 不用于医疗诊断。",
+        "developer_info":"由 Knoxy Nexus 开发",
+        "lang_label":    "🌐 语言",
+        "pred_label":    "预测", "conf_label": "置信度",
+        "prob_strab":    "P(斜视)  ", "prob_normal": "P(正常)  ",
+        "class_normal":  "正常", "class_strab": "斜视",
+        "chart_title":   "类别概率", "chart_ylabel": "概率 (%)",
+        "err_no_model":  "❌ 模型未加载。", "err_no_eye": "❌ 无效图片", "err_predict": "预测错误",
     },
     "ml": {
-        "title":          "👁️ സ്ട്രാബിസ്മസ് നിർണ്ണയ സംവിധാനം",
-        "subtitle":       "കണ്ണുകൾ **സാധാരണ നിലയിലാണോ** അതോ **സ്ട്രാബിസ്മസിന്റെ (മാരകണ്ണ്/കോങ്കണ്ണ്)** ലക്ഷണങ്ങൾ കാണിക്കുന്നുണ്ടോ എന്ന് കണ്ടെത്തുന്നതിന് ഒരു കണ്ണിന്റെ ചിത്രം അപ്‌ലോഡ് ചെയ്യുക അല്ലെങ്കിൽ നിങ്ങളുടെ വെബ്‌ക്യാം ഉപയോഗിക്കുക.",
-        "what_title":     "### 👁️ എന്താണ് സ്ട്രാബിസ്മസ് (കോങ്കണ്ണ്)?",
-        "what_body":      "രണ്ട് കണ്ണുകളും ഒരേ സമയം ഒരേ ബിന്ദുവിലേക്ക് നോക്കാത്ത അവസ്ഥയാണ് **സ്ട്രാബിസ്മസ്** (കോങ്കണ്ണ്). ഒരു കണ്ണ് നേരെ നോക്കുമ്പോൾ മറ്റേ കണ്ണ് ഉള്ളിലേക്കോ, പുറത്തേക്കോ, മുകളിലേക്കോ, താഴേക്കോ തിരിഞ്ഞിരിക്കാം.",
-        "types_title":    "#### തരങ്ങൾ",
-        "types_body":     "- **എസോട്രോപ്പിയ (Esotropia)** — കണ്ണ് *ഉള്ളിലേക്ക്* തിരിയുന്നു (കുട്ടികളിൽ സാധാരണയായി കാണപ്പെടുന്നു)\n- **എക്സോട്രോപ്പിയ (Exotropia)** — കണ്ണ് *പുറത്തേക്ക്* തിരിയുന്നു\n- **ഹൈപ്പർട്രോപ്പിയ (Hypertropia)** — കണ്ണ് *മുകളിലേക്ക്* തിരിയുന്നു\n- **ഹൈപ്പോട്രോപ്പിയ (Hypotropia)** — കണ്ണ് *താഴേക്ക്* തിരിയുന്നു\n\n> നേരത്തെയുള്ള കണ്ടെത്തൽ പ്രധാനമാണ് — കൃത്യസമയത്ത് ചികിത്സിച്ചില്ലെങ്കിൽ സ്ട്രാബിസ്മസ് അംബ്ലിയോപ്പിയയിലേക്കോ (amblyopia/സോംബേരി കണ്ണ്) ശാശ്വതമായ കാഴ്ചനഷ്ടത്തിലേക്കോ നയിച്ചേക്കാം.",
-        "tab_upload":     "📁 ചിത്രം അപ്‌ലോഡ് ചെയ്യുക",
-        "tab_webcam":     "📷 വെബ്‌ക്യാം വഴി ചിത്രമെടുക്കുക",
-        "upload_label":   "കണ്ണിന്റെ ചിത്രം അപ്‌ലോഡ് ചെയ്യുക",
-        "analyze_upload": "🔍 അപ്‌ലോഡ് ചെയ്ത ചിത്രം പരിശോധിക്കുക",
-        "result_label":   "ഫലം",
-        "probs_label":    "സാധ്യതാനിരക്കുകൾ (Class Probabilities)",
-        "plot_label":     "സാധ്യതാ ഗ്രാഫ്",
-        "cam_label":      "ലൈവ് ക്യാമറ ഫീഡ്",
-        "cam_tip":        "ℹ️ ചോദിക്കുമ്പോൾ ക്യാമറ ആക്സസ് അനുവദിക്കുക. ക്യാമറ ബോക്സിനുള്ളിലെ **📷 സ്നാപ്പ്ഷോട്ട് (snapshot)** ബട്ടൺ ക്ലിക്ക് ചെയ്യുക, തുടർന്ന് **Analyze Snapshot** അമർത്തുക.",
-        "analyze_webcam": "🔍 സ്നാപ്പ്ഷോട്ട് പരിശോധിക്കുക",
-        "no_snap":        "⚠️ സ്നാപ്പ്ഷോട്ട് എടുത്തിട്ടില്ല. ആദ്യം 📷 ക്യാപ്ചർ ബട്ടൺ ക്ലിക്ക് ചെയ്യുക.",
-        "disclaimer":     "⚠️ **നിരാകരണം (Disclaimer):** ഇതൊരു AI അധിഷ്ഠിത സ്ക്രീനിംഗ് ടൂൾ മാത്രമാണ്, **മെഡിക്കൽ രോഗനിർണ്ണയത്തിനോ ക്ലിനിക്കൽ ആവശ്യങ്ങൾക്കോ ഉള്ളതല്ല**. കൃത്യമായ രോഗനിർണ്ണയത്തിനും ചികിത്സയ്ക്കും എപ്പോഴും യോഗ്യതയുള്ള ഒരു ഒഫ്താൽമോളജിസ്റ്റിനെയോ (കണ്ണ് രോഗവിദഗ്ദ്ധൻ) മെഡിക്കൽ പ്രൊഫഷണലിനെയോ സമീപിക്കുക.",
-        "developer_info": "നോക്സി നെക്സസ് (Knoxy Nexus) വികസിപ്പിച്ചതും പരിപാലിക്കുന്നതും",
-        "chart_title":    "ക്ലാസ് പ്രോബബിലിറ്റി ഡിസ്ട്രിബ്യൂഷൻ",
-        "chart_ylabel":   "സാധ്യത (%)",
-        "lang_label":     "🌐 ഭാഷ"
+        "title":         "👁️ സ്ട്രാബിസ്മസ് നിർണ്ണയ സംവിധാനം",
+        "subtitle":      "കണ്ണിന്റെ ചിത്രം അപ്‌ലോഡ് ചെയ്യുക അല്ലെങ്കിൽ വെബ്‌ക്യാം ഉപയോഗിക്കുക.",
+        "what_title":    "### 👁️ എന്താണ് സ്ട്രാബിസ്മസ്?",
+        "what_body":     "**സ്ട്രാബിസ്മസ്** — ഒരു കണ്ണ് ഉള്ളിലേക്കോ, പുറത്തേക്കോ, മുകളിലേക്കോ, താഴേക്കോ തിരിഞ്ഞിരിക്കും.",
+        "types_title":   "#### തരങ്ങൾ",
+        "types_body":    "- **എസോട്രോപ്പിയ** — ഉള്ളിലേക്ക്\n- **എക്സോട്രോപ്പിയ** — പുറത്തേക്ക്\n- **ഹൈപ്പർട്രോപ്പിയ** — മുകളിലേക്ക്\n- **ഹൈപ്പോട്രോപ്പിയ** — താഴേക്ക്",
+        "tab_upload":    "📁 അപ്‌ലോഡ്", "tab_webcam": "📷 വെബ്‌ക്യാം",
+        "upload_label":  "കണ്ണിന്റെ ചിത്രം", "btn_upload": "🔍 പരിശോധിക്കുക", "btn_webcam": "🔍 പരിശോധിക്കുക",
+        "result_label":  "ഫലം", "plot_label": "ആത്മവിശ്വാസ ചാർട്ട്",
+        "cam_label":     "ലൈവ് ക്യാമറ", "cam_tip": "ℹ️ 📷 ബട്ടൺ ക്ലിക്ക് ചെയ്ത് പരിശോധിക്കുക.",
+        "no_snap":       "⚠️ സ്നാപ്പ്ഷോട്ട് ഇല്ല.",
+        "disclaimer":    "⚠️ **നിരാകരണം:** വൈദ്യ നിർണ്ണയത്തിനല്ല.",
+        "developer_info":"Knoxy Nexus വികസിപ്പിച്ചത്",
+        "lang_label":    "🌐 ഭാഷ",
+        "pred_label":    "പ്രവചനം", "conf_label": "ആത്മവിശ്വാസം",
+        "prob_strab":    "P(സ്ട്രാബിസ്മസ്)", "prob_normal": "P(സാധാരണം)    ",
+        "class_normal":  "സാധാരണം", "class_strab": "സ്ട്രാബിസ്മസ്",
+        "chart_title":   "ക്ലാസ് സാധ്യതകൾ", "chart_ylabel": "സാധ്യത (%)",
+        "err_no_model":  "❌ മോഡൽ ലോഡ് ആയില്ല.", "err_no_eye": "❌ അസാധുവായ ചിത്രം", "err_predict": "പ്രവചന പിഴവ്",
     },
     "kn": {
-        "title":          "👁️ ಸ್ಕ್ವಿಂಟ್ (ಓರೆಗಣ್ಣು) ಪತ್ತೆ ಹಚ್ಚುವ ವ್ಯವಸ್ಥೆ",
-        "subtitle":       "ಕಣ್ಣುಗಳು **ಸಾಮಾನ್ಯವಾಗಿವೆಯೇ** ಅಥವಾ **ಓರೆಗಣ್ಣಿನ (Strabismus)** ಲಕ್ಷಣಗಳನ್ನು ಹೊಂದಿವೆಯೇ ಎಂದು ಪತ್ತೆ ಹಚ್ಚಲು ಕಣ್ಣಿನ ಚಿತ್ರವನ್ನು ಅಪ್‌ಲೋಡ್ ಮಾಡಿ ಅಥವಾ ವೆಬ್‌ಕ್ಯಾಮ್ ಬಳಸಿ.",
-        "what_title":     "### 👁️ ಓರೆಗಣ್ಣು (Strabismus) ಎಂದರೇನು?",
-        "what_body":      "**ಓರೆಗಣ್ಣು** ಎಂಬುದು ಎರಡು ಕಣ್ಣುಗಳು ಒಂದೇ ಸಮಯದಲ್ಲಿ ಒಂದೇ ಬಿಂದುವನ್ನು ನೋಡದ ಸ್ಥಿತಿಯಾಗಿದೆ. ಒಂದು ಕಣ್ಣು ನೇರವಾಗಿ ನೋಡುತ್ತಿರುವಾಗ, ಮತ್ತೊಂದು ಕಣ್ಣು ಒಳಗೆ, ಹೊರಗೆ, ಮೇಲಕ್ಕೆ ಅಥವಾ ಕೆಳಕ್ಕೆ ತಿರುಗಿರಬಹುದು.",
-        "types_title":    "#### ವಿಧಗಳು",
-        "types_body":     "- **ಈಸೋಟ್ರೋಪಿಯಾ (Esotropia)** — ಕಣ್ಣು *ಒಳಮುಖವಾಗಿ* ತಿರುಗುವುದು (ಮಕ್ಕಳಲ್ಲಿ ಹೆಚ್ಚು ಸಾಮಾನ್ಯ)\n- **ಎಕ್ಸೋಟ್ರೋಪಿಯಾ (Exotropia)** — ಕಣ್ಣು *ಹೊರಮುಖವಾಗಿ* ತಿರುಗುವುದು\n- **ಹೈಪರ್‌ಟ್ರೋಪಿಯಾ (Hypertropia)** — ಕಣ್ಣು *ಮೇಲ್ಮುಖವಾಗಿ* ತಿರುಗುವುದು\n- **ಹೈಪೋಟ್ರೋಪಿಯಾ (Hypotropia)** — ಕಣ್ಣು *ಕೆಳಮುಖವಾಗಿ* ತಿರುಗುವುದು\n\n> ಆರಂಭಿಕ ಪತ್ತೆ ಬಹಳ ಮುಖ್ಯ — ಚಿಕಿತ್ಸೆ ನೀಡದ ಓರೆಗಣ್ಣು ಆಂಬ್ಲಿಯೋಪಿಯಾ (ಸೋಮಾರಿ ಕಣ್ಣು) ಅಥವಾ ಶಾಶ್ವತ ದೃಷ್ಟಿ ದೋಷಕ್ಕೆ ಕಾರಣವಾಗಬಹುದು.",
-        "tab_upload":     "📁 ಚಿತ್ರವನ್ನು ಅಪ್‌ಲೋಡ್ ಮಾಡಿ",
-        "tab_webcam":     "📷 ವೆಬ್‌ಕ್ಯಾಮ್ ಮೂಲಕ ಸೆರೆಹಿಡಿಯಿರಿ",
-        "upload_label":   "ಕಣ್ಣಿನ ಚಿತ್ರವನ್ನು ಅಪ್‌ಲೋಡ್ ಮಾಡಿ",
-        "analyze_upload": "🔍 ಅಪ್‌ಲೋಡ್ ಮಾಡಿದ ಚಿತ್ರವನ್ನು ವಿಶ್ಲೇಷಿಸಿ",
-        "result_label":   "ಫಲಿತಾಂಶ",
-        "probs_label":    "ವರ್ಗೀಕರಣದ ಸಂಭವನೀಯತೆಗಳು",
-        "plot_label":     "ಸಂಭವನೀಯತೆಯ ಗ್ರಾಫ್",
-        "cam_label":      "ಲೈವ್ ಕ್ಯಾಮೆರಾ ಫೀಡ್",
-        "cam_tip":        "ℹ️ ಕೇಳಿದಾಗ ಕ್ಯಾಮೆರಾ ಬಳಸಲು ಅನುಮತಿ ನೀಡಿ. ಕ್ಯಾಮೆರಾ ಬಾಕ್ಸ್ ಒಳಗಿರುವ **📷 ಸ್ನ್ಯಾಪ್‌ಶಾಟ್** ಬಟನ್ ಕ್ಲಿಕ್ ಮಾಡಿ, ನಂತರ **ಸ್ನ್ಯಾಪ್‌ಶಾಟ್ ವಿಶ್ಲೇಷಿಸಿ** ಬಟನ್ ಒತ್ತಿ.",
-        "analyze_webcam": "🔍 ಸ್ನ್ಯಾಪ್‌ಶಾಟ್ ವಿಶ್ಲೇಷಿಸಿ",
-        "no_snap":        "⚠️ ಯಾವುದೇ ಸ್ನ್ಯಾಪ್‌ಶಾಟ್ ಸೆರೆಹಿಡಿದಿಲ್ಲ. ಮೊದಲು 📷 ಕ್ಯಾಪ್ಚರ್ ಬಟನ್ ಕ್ಲಿಕ್ ಮಾಡಿ.",
-        "disclaimer":     "⚠️ **ಹಕ್ಕು ನಿರಾಕರಣೆ:** ಇದು ಎಐ (AI) ಆಧಾರಿತ ಸ್ಕ್ರೀನಿಂಗ್ ಸಾಧನವಾಗಿದೆ ಮತ್ತು ಇದು **ವೈದ್ಯಕೀಯ ರೋಗನಿರ್ಣಯ ಅಥವಾ ಕ್ಲಿನಿಕಲ್ ಬಳಕೆಗೆ ಉದ್ದೇಶಿಸಿಲ್ಲ**. ನಿಖರವಾದ ರೋಗನಿರ್ಣಯ ಮತ್ತು ಚಿಕಿತ್ಸೆಗಾಗಿ ಯಾವಾಗಲೂ ಅರ್ಹ ನೇತ್ರ ತಜ್ಞರು ಅಥವಾ ವೈದ್ಯಕೀಯ ವೃತ್ತಿಪರರನ್ನು ಸಂಪರ್ಕಿಸಿ.",
-        "developer_info": "Knoxy Nexus ನಿಂದ ಅಭಿವೃದ್ಧಿಪಡಿಸಲಾಗಿದೆ ಮತ್ತು ನಿರ್ವಹಿಸಲ್ಪಡುತ್ತಿದೆ",
-        "chart_title":    "ವರ್ಗೀಕರಣದ ಸಂಭವನೀಯತೆಯ ಹಂಚಿಕೆ",
-        "chart_ylabel":   "ಸಂಭವನೀಯತೆ (%)",
-        "lang_label":     "🌐 ಭಾಷೆ"
+        "title":         "👁️ ಓರೆಗಣ್ಣು ಪತ್ತೆ ವ್ಯವಸ್ಥೆ",
+        "subtitle":      "ಕಣ್ಣಿನ ಚಿತ್ರ ಅಪ್‌ಲೋಡ್ ಮಾಡಿ ಅಥವಾ ವೆಬ್‌ಕ್ಯಾಮ್ ಬಳಸಿ.",
+        "what_title":    "### 👁️ ಓರೆಗಣ್ಣು ಎಂದರೇನು?",
+        "what_body":     "**ಓರೆಗಣ್ಣು** — ಒಂದು ಕಣ್ಣು ಒಳಗೆ, ಹೊರಗೆ, ಮೇಲಕ್ಕೆ ಅಥವಾ ಕೆಳಕ್ಕೆ ತಿರುಗಿರಬಹುದು.",
+        "types_title":   "#### ವಿಧಗಳು",
+        "types_body":    "- **ಈಸೋಟ್ರೋಪಿಯಾ** — ಒಳಮುಖ\n- **ಎಕ್ಸೋಟ್ರೋಪಿಯಾ** — ಹೊರಮುಖ\n- **ಹೈಪರ್‌ಟ್ರೋಪಿಯಾ** — ಮೇಲ್ಮುಖ\n- **ಹೈಪೋಟ್ರೋಪಿಯಾ** — ಕೆಳಮುಖ",
+        "tab_upload":    "📁 ಅಪ್‌ಲೋಡ್", "tab_webcam": "📷 ವೆಬ್‌ಕ್ಯಾಮ್",
+        "upload_label":  "ಕಣ್ಣಿನ ಚಿತ್ರ", "btn_upload": "🔍 ವಿಶ್ಲೇಷಿಸಿ", "btn_webcam": "🔍 ವಿಶ್ಲೇಷಿಸಿ",
+        "result_label":  "ಫಲಿತಾಂಶ", "plot_label": "ವಿಶ್ವಾಸ ಚಾರ್ಟ್",
+        "cam_label":     "ಲೈವ್ ಕ್ಯಾಮೆರಾ", "cam_tip": "ℹ️ 📷 ಕ್ಲಿಕ್ ಮಾಡಿ ವಿಶ್ಲೇಷಿಸಿ.",
+        "no_snap":       "⚠️ ಸ್ನ್ಯಾಪ್‌ಶಾಟ್ ಇಲ್ಲ.",
+        "disclaimer":    "⚠️ **ನಿರಾಕರಣೆ:** ವೈದ್ಯಕೀಯ ನಿರ್ಣಯಕ್ಕಲ್ಲ.",
+        "developer_info":"Knoxy Nexus ಅಭಿವೃದ್ಧಿ",
+        "lang_label":    "🌐 ಭಾಷೆ",
+        "pred_label":    "ಭವಿಷ್ಯವಾಣಿ", "conf_label": "ವಿಶ್ವಾಸ",
+        "prob_strab":    "P(ಓರೆಗಣ್ಣು)", "prob_normal": "P(ಸಾಮಾನ್ಯ)   ",
+        "class_normal":  "ಸಾಮಾನ್ಯ", "class_strab": "ಓರೆಗಣ್ಣು",
+        "chart_title":   "ಸಂಭವನೀಯತೆಗಳು", "chart_ylabel": "ಸಂಭವನೀಯತೆ (%)",
+        "err_no_model":  "❌ ಮಾದರಿ ಲೋಡ್ ಆಗಿಲ್ಲ.", "err_no_eye": "❌ ಅಮಾನ್ಯ ಚಿತ್ರ", "err_predict": "ಭವಿಷ್ಯವಾಣಿ ದೋಷ",
     },
-
-
 }
 
 def t(lang_name, key):
@@ -360,154 +458,26 @@ def t(lang_name, key):
     return T.get(code, T["en"]).get(key, T["en"][key])
 
 # =============================================================================
-# Model loading
-# =============================================================================
-model  = None
-classes = []
-
-def load_model_safe():
-    global model, classes
-    try:
-        model = tf.keras.models.load_model("models/strabismus_model.keras")
-        dummy = np.zeros((1, 224, 224, 3), dtype=np.float32)
-        model.predict(dummy, verbose=0)
-        with open("models/class_indices.json", "r") as f:
-            class_indices = json.load(f)
-        classes = [None] * len(class_indices)
-        for k, v in class_indices.items():
-            classes[v] = k
-        print("Model loaded and warmed up.")
-    except Exception as e:
-        print(f"Model loading failed: {e}")
-        model = None
-        classes = []
-
-load_model_safe()
-
-# =============================================================================
-# Eye Detection
-# =============================================================================
-EYE_CASCADE  = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_eye.xml")
-FACE_CASCADE = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
-
-def contains_human_eye(pil_img):
-    img_np = np.array(pil_img.convert("RGB"))
-    gray   = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
-    gray   = cv2.equalizeHist(gray)
-    faces  = FACE_CASCADE.detectMultiScale(gray, 1.1, 5, minSize=(60, 60))
-    if len(faces) > 0:
-        for (fx, fy, fw, fh) in faces:
-            roi  = gray[fy:fy+fh, fx:fx+fw]
-            eyes = EYE_CASCADE.detectMultiScale(roi, 1.1, 4, minSize=(20, 20))
-            if len(eyes) > 0:
-                return True, ""
-        return False, "A face was detected but no open eyes could be found.\nPlease ensure the eyes are open, unobstructed, and well-lit."
-    eyes = EYE_CASCADE.detectMultiScale(gray, 1.05, 6, minSize=(30, 30))
-    if len(eyes) > 0:
-        return True, ""
-    return False, "No human eyes detected in this image.\nPlease upload a clear photo showing human eyes.\nTips: ensure good lighting, eyes are open and visible."
-
-# =============================================================================
-# Preprocess
-# =============================================================================
-def preprocess_image(img):
-    if max(img.size) > 512:
-        img.thumbnail((512, 512), Image.BILINEAR)
-    img       = img.resize((224, 224), Image.BILINEAR)
-    img_array = np.array(img, dtype=np.float32) / 255.0
-    return np.expand_dims(img_array, axis=0)
-
-# =============================================================================
-# Core Prediction
-# =============================================================================
-def run_prediction(img, lang):
-    if model is None:
-        return "❌ Model not loaded. Please restart the app.", {}, None
-    if img is None:
-        return "⚠️ No image provided.", {}, None
-    try:
-        img = img.convert("RGB")
-        if max(img.size) > 640:
-            img.thumbnail((640, 640), Image.BILINEAR)
-        has_eye, reason = contains_human_eye(img)
-        if not has_eye:
-            return "Invalid Image\n\n" + reason, {}, None
-
-        input_data = preprocess_image(img)
-        with _predict_lock:
-            prediction = model.predict(input_data, verbose=0)[0]
-
-        prob_dict       = {classes[i]: float(prediction[i]) for i in range(len(classes))}
-        predicted_index = int(np.argmax(prediction))
-        predicted_class = classes[predicted_index]
-        confidence      = prediction[predicted_index] * 100
-        final_result    = "✅ NORMAL" if predicted_class == "NORMAL" else "⚠️ STRABISMUS DETECTED"
-
-        chart_title  = t(lang, "chart_title")
-        chart_ylabel = t(lang, "chart_ylabel")
-
-        fig, ax = plt.subplots(figsize=(5, 3))
-        labels  = list(prob_dict.keys())
-        values  = [v * 100 for v in prob_dict.values()]
-        colors  = ["#2ecc71" if l == "NORMAL" else "#e74c3c" for l in labels]
-        bars    = ax.bar(labels, values, color=colors, edgecolor="white", linewidth=0.8)
-        ax.set_xticklabels(labels, rotation=30, ha="right", fontsize=9)
-        ax.set_ylabel(chart_ylabel, fontsize=9)
-        ax.set_ylim(0, 100)
-        ax.set_title(chart_title, fontsize=10)
-        for bar, val in zip(bars, values):
-            ax.text(
-                bar.get_x() + bar.get_width() / 2,
-                bar.get_height() + 1.5,
-                f"{val:.1f}%",
-                ha="center", va="bottom", fontsize=8
-            )
-        fig.tight_layout()
-
-        result_text = (
-            f"Prediction   : {final_result}\n"
-            f"Class        : {predicted_class}\n"
-            f"Confidence   : {confidence:.2f}%"
-        )
-        return result_text, prob_dict, fig
-
-    except Exception as e:
-        return f"❌ Prediction error: {str(e)}", {}, None
-    finally:
-        plt.close("all")
-
-# =============================================================================
-# Tab wrappers
-# =============================================================================
-def predict_upload(img, lang):
-    return run_prediction(img, lang)
-
-def predict_webcam(img, lang):
-    if img is None:
-        return t(lang, "no_snap"), {}, None
-    pil_img = Image.fromarray(img.astype("uint8"))
-    return run_prediction(pil_img, lang)
-
-# =============================================================================
-# UI update on language change
+# Language switcher  — must match outputs list exactly (16 items)
 # =============================================================================
 def change_language(lang):
     return (
         gr.update(value=f"# {t(lang,'title')}\n{t(lang,'subtitle')}"),
-        gr.update(value=t(lang, "what_title") + "\n\n" + t(lang, "what_body") + "\n\n" + t(lang, "types_title") + "\n" + t(lang, "types_body")),
-        gr.update(label=t(lang, "upload_label")),
-        gr.update(value=t(lang, "analyze_upload")),
-        gr.update(label=t(lang, "result_label")),
-        gr.update(label=t(lang, "probs_label")),
-        gr.update(label=t(lang, "plot_label")),
-        gr.update(label=t(lang, "cam_label")),
-        gr.update(value=t(lang, "cam_tip")),
-        gr.update(value=t(lang, "analyze_webcam")),
-        gr.update(label=t(lang, "result_label")),
-        gr.update(label=t(lang, "probs_label")),
-        gr.update(label=t(lang, "plot_label")),
-        gr.update(value=f"---\n> {t(lang, 'disclaimer')}\n\n*{t(lang, 'developer_info')}*"),
-    
+        gr.update(value=(t(lang,"what_title") + "\n\n" + t(lang,"what_body") +
+                         "\n\n" + t(lang,"types_title") + "\n" + t(lang,"types_body"))),
+        # upload tab
+        gr.update(label=t(lang,"upload_label")),
+        gr.update(value=t(lang,"btn_upload")),
+        gr.update(label=t(lang,"result_label")),
+        gr.update(label=t(lang,"plot_label")),
+        # webcam tab
+        gr.update(label=t(lang,"cam_label")),
+        gr.update(value=t(lang,"cam_tip")),
+        gr.update(value=t(lang,"btn_webcam")),
+        gr.update(label=t(lang,"result_label")),
+        gr.update(label=t(lang,"plot_label")),
+        # footer
+        gr.update(value=f"---\n> {t(lang,'disclaimer')}\n\n*{t(lang,'developer_info')}*"),
     )
 
 # =============================================================================
@@ -515,101 +485,76 @@ def change_language(lang):
 # =============================================================================
 with gr.Blocks(title="👁️ Strabismus Detection System") as demo:
 
-    # Language selector
+    # ── Header + language selector ───────────────────────────────────────────
     with gr.Row():
         with gr.Column(scale=4):
-            header_md = gr.Markdown(
-                f"# {t('English','title')}\n{t('English','subtitle')}"
-            )
+            header_md = gr.Markdown(f"# {t('English','title')}\n{t('English','subtitle')}")
         with gr.Column(scale=1, min_width=160):
             lang_dd = gr.Dropdown(
-                choices=list(LANGUAGES.keys()),
-                value="English",
-                label=t("English", "lang_label"),
-                interactive=True,
+                choices=list(LANGUAGES.keys()), value="English",
+                label=t("English","lang_label"), interactive=True,
             )
 
-    # About / Info section
+    # ── Info section ─────────────────────────────────────────────────────────
     info_md = gr.Markdown(
-        t("English", "what_title") + "\n\n" +
-        t("English", "what_body")  + "\n\n" +
-        t("English", "types_title") + "\n" +
-        t("English", "types_body")
+        t("English","what_title") + "\n\n" + t("English","what_body") + "\n\n" +
+        t("English","types_title") + "\n" + t("English","types_body")
     )
-
     gr.Markdown("---")
 
+    # ── Tabs ─────────────────────────────────────────────────────────────────
     with gr.Tabs():
 
-        # ── Tab 1: Upload ────────────────────────────────────────────────────
-        with gr.TabItem(t("English", "tab_upload")):
+        # Tab 1 — Upload
+        with gr.TabItem(t("English","tab_upload")):
             with gr.Row():
                 with gr.Column(scale=1):
                     upload_input = gr.Image(
-                        type="pil",
-                        label=t("English", "upload_label"),
-                        sources=["upload"],
-                    )
-                    upload_btn = gr.Button(t("English", "analyze_upload"), variant="primary")
-
+                        type="pil", label=t("English","upload_label"), sources=["upload"])
+                    upload_btn   = gr.Button(t("English","btn_upload"), variant="primary")
                 with gr.Column(scale=1):
-                    upload_result = gr.Textbox(label=t("English", "result_label"), lines=5)
-                    upload_probs  = gr.Label(label=t("English", "probs_label"))
-                    upload_plot   = gr.Plot(label=t("English", "plot_label"))
+                    upload_result = gr.Textbox(label=t("English","result_label"), lines=5)
+                    upload_plot   = gr.Plot(label=t("English","plot_label"))
 
             upload_btn.click(
-                fn=predict_upload,
-                inputs=[upload_input, lang_dd],
-                outputs=[upload_result, upload_probs, upload_plot],
-            )
+                fn=predict_upload, inputs=[upload_input, lang_dd],
+                outputs=[upload_result, upload_plot, gr.State()])
             upload_input.change(
-                fn=predict_upload,
-                inputs=[upload_input, lang_dd],
-                outputs=[upload_result, upload_probs, upload_plot],
-            )
+                fn=predict_upload, inputs=[upload_input, lang_dd],
+                outputs=[upload_result, upload_plot, gr.State()])
 
-        # ── Tab 2: Webcam ────────────────────────────────────────────────────
-        with gr.TabItem(t("English", "tab_webcam")):
+        # Tab 2 — Webcam
+        with gr.TabItem(t("English","tab_webcam")):
             with gr.Row():
                 with gr.Column(scale=1):
                     webcam_input = gr.Image(
-                        type="numpy",
-                        label=t("English", "cam_label"),
-                        sources=["webcam"],
-                        streaming=False,
-                    )
-                    cam_tip_md = gr.Markdown(t("English", "cam_tip"))
-                    webcam_btn = gr.Button(t("English", "analyze_webcam"), variant="primary")
-
+                        type="numpy", label=t("English","cam_label"),
+                        sources=["webcam"], streaming=False)
+                    cam_tip_md   = gr.Markdown(t("English","cam_tip"))
+                    webcam_btn   = gr.Button(t("English","btn_webcam"), variant="primary")
                 with gr.Column(scale=1):
-                    webcam_result = gr.Textbox(label=t("English", "result_label"), lines=5)
-                    webcam_probs  = gr.Label(label=t("English", "probs_label"))
-                    webcam_plot   = gr.Plot(label=t("English", "plot_label"))
+                    webcam_result = gr.Textbox(label=t("English","result_label"), lines=5)
+                    webcam_plot   = gr.Plot(label=t("English","plot_label"))
 
             webcam_btn.click(
-                fn=predict_webcam,
-                inputs=[webcam_input, lang_dd],
-                outputs=[webcam_result, webcam_probs, webcam_plot],
-            )
+                fn=predict_webcam, inputs=[webcam_input, lang_dd],
+                outputs=[webcam_result, webcam_plot, gr.State()])
             webcam_input.change(
-                fn=predict_webcam,
-                inputs=[webcam_input, lang_dd],
-                outputs=[webcam_result, webcam_probs, webcam_plot],
-            )
+                fn=predict_webcam, inputs=[webcam_input, lang_dd],
+                outputs=[webcam_result, webcam_plot, gr.State()])
 
+    # ── Footer ───────────────────────────────────────────────────────────────
     disclaimer_md = gr.Markdown(
-        f"---\n> {t('English', 'disclaimer')}\n\n*{t('English', 'developer_info')}*"
+        f"---\n> {t('English','disclaimer')}\n\n*{t('English','developer_info')}*"
     )
- 
 
-    # Wire language switcher
+    # ── Wire language switcher ───────────────────────────────────────────────
     lang_dd.change(
-        fn=change_language,
-        inputs=[lang_dd],
+        fn=change_language, inputs=[lang_dd],
         outputs=[
             header_md, info_md,
-            upload_input, upload_btn, upload_result, upload_probs, upload_plot,
-            webcam_input, cam_tip_md, webcam_btn, webcam_result, webcam_probs, webcam_plot,
+            upload_input, upload_btn, upload_result, upload_plot,
+            webcam_input, cam_tip_md, webcam_btn, webcam_result, webcam_plot,
             disclaimer_md,
         ],
     )
@@ -617,14 +562,5 @@ with gr.Blocks(title="👁️ Strabismus Detection System") as demo:
 # =============================================================================
 # Launch
 # =============================================================================
-demo.queue(
-    max_size=100,
-    default_concurrency_limit=2,
-)
-demo.launch(
-    server_name="0.0.0.0",
-    server_port=7860,
-    ssr_mode=False,
-    show_error=True,
-    
-)
+demo.queue(max_size=100, default_concurrency_limit=2)
+demo.launch(server_name="0.0.0.0", server_port=7860, ssr_mode=False, show_error=True)
